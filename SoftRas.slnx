@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="SoftRas.vcxproj" Id="d328fb3d-9d07-46d3-9dc7-36d381b320c3" />
+</Solution>
