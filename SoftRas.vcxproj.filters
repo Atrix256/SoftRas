@@ -21,5 +21,6 @@
     <ClInclude Include="external\stb\stb_image_write.h">
       <Filter>external\stb</Filter>
     </ClInclude>
+    <ClInclude Include="MathUtils.h" />
   </ItemGroup>
 </Project>
