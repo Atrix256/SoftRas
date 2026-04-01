@@ -132,10 +132,22 @@ void RasterizeMesh(unsigned char* pixels, GBuffer* gBuffer, unsigned int width, 
         {
             int pixelIndex = iy * width + ix;
 
+            GBuffer& gb = gBuffer[pixelIndex];
+            gb = GBuffer();
+
+            // TODO: temp
+            if (Thirteen::GetMouseButton(0) && !Thirteen::GetMouseButtonLastFrame(0))
+            {
+                int mouseX, mouseY;
+                Thirteen::GetMousePosition(mouseX, mouseY);
+                if (ix == mouseX && iy == mouseY)
+                {
+                    int ijkl = 0;
+                }
+            }
+
             for (int triangleIndex = 0; triangleIndex < _countof(g_mesh) / 3; ++triangleIndex)
             {
-                GBuffer& gb = gBuffer[pixelIndex];
-
                 const Vertex& vA = g_mesh[triangleIndex * 3 + 0];
                 const Vertex& vB = g_mesh[triangleIndex * 3 + 1];
                 const Vertex& vC = g_mesh[triangleIndex * 3 + 2];
@@ -157,14 +169,15 @@ void RasterizeMesh(unsigned char* pixels, GBuffer* gBuffer, unsigned int width, 
                 else
                     uvw.z = 1.0f - uvw.x - uvw.y;
 
-                // TODO: not sure about this bit. need to deal with separate depth layers.
+                // TODO: this stuff next. need to deal with separate depth layers.
                 Point3D color = (vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z) * gb.coverage;
-
-                pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(color.x * 255.0f, 0.0f, 255.0f);
-                pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(color.y * 255.0f, 0.0f, 255.0f);
-                pixels[pixelIndex * 4 + 2] = (unsigned char)Clamp(color.z * 255.0f, 0.0f, 255.0f);
-                pixels[pixelIndex * 4 + 3] = 255;
+                gb.color = color;
             }
+
+            pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(gb.color.x * 255.0f, 0.0f, 255.0f);
+            pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(gb.color.y * 255.0f, 0.0f, 255.0f);
+            pixels[pixelIndex * 4 + 2] = (unsigned char)Clamp(gb.color.z * 255.0f, 0.0f, 255.0f);
+            pixels[pixelIndex * 4 + 3] = 255;
         }
     }
 }
