@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <vector>
+#include <algorithm>
 
 #define THIRTEEN_IMPLEMENTATION
 #include "external/thirteen.h"
@@ -16,34 +17,55 @@
 
 #define MULTI_THREADED() 0 // TODO: turn to true when working
 
-static const float c_epsilon = 3.0f;
+static const float c_epsilon = 3.0f; // TODO: paper uses 1x10^-4. what should we use?
+
+struct GBuffer
+{
+    float coverage = 0.0f;
+};
+
+struct Vertex
+{
+    Point2D pos;
+    Point3D color;
+};
 
 // In UV space
-Point2D g_mesh[] =
+Vertex g_mesh[] =
 {
-//    {0.0f, 0.0f},
-//    {1.0f, 0.0f},
-//    {1.0f, 1.0f},
+    { {0.3f, 0.3f}, {1.0f, 0.0f, 0.0f} },
+    { {0.6f, 0.3f}, {1.0f, 0.0f, 0.0f} },
+    { {0.6f, 0.6f}, {1.0f, 0.0f, 0.0f} },
 
-    {0.3f, 0.3f},
-    {0.6f, 0.3f},
-    {0.6f, 0.6f},
-
-//    {0.6f, 0.6f},
-//    {0.6f, 0.3f},
-//    {0.3f, 0.3f},
+    { {0.1f, 0.1f}, {1.0f, 0.0f, 0.0f} },
+    { {0.2f, 0.1f}, {0.0f, 1.0f, 0.0f} },
+    { {0.2f, 0.2f}, {0.0f, 0.0f, 1.0f} },
 };
+
+// Triangle SDF from https://iquilezles.org/articles/distfunctions2d/
+// Returns positive values if outside the triangle, negative values if inside the triangle
+float sdTriangle(const Point2D& p, const Point2D& p0, const Point2D& p1, const Point2D& p2)
+{
+    Point2D e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
+    Point2D v0 = p - p0, v1 = p - p1, v2 = p - p2;
+    Point2D pq0 = v0 - e0 * Clamp(Dot(v0, e0) / Dot(e0, e0), 0.0f, 1.0f);
+    Point2D pq1 = v1 - e1 * Clamp(Dot(v1, e1) / Dot(e1, e1), 0.0f, 1.0f);
+    Point2D pq2 = v2 - e2 * Clamp(Dot(v2, e2) / Dot(e2, e2), 0.0f, 1.0f);
+    float s = Sign(e0.x * e2.y - e0.y * e2.x);
+    Point2D d = std::min(std::min(Point2D(Dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)),
+        Point2D(Dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x))),
+        Point2D(Dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)));
+    return -sqrt(d.x) * Sign(d.y);
+}
 
 float SoftCoverage(const Point2D& P, const Point2D& A, const Point2D& B, const Point2D& C)
 {
-    float e0 = Signed2DTriArea(A, B, P);
-    float e1 = Signed2DTriArea(B, C, P);
-    float e2 = Signed2DTriArea(C, A, P);
-
-    return Sigmoid(e0 / c_epsilon) * Sigmoid(e1 / c_epsilon) * Sigmoid(e2 / c_epsilon);
+    // Equation 1
+    float sdf = -sdTriangle(P, A, B, C);
+    return Sigmoid(Sign(sdf) * sdf * sdf / c_epsilon);
 }
 
-void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int height)
+void RasterizeMesh(unsigned char* pixels, GBuffer* gBuffer, unsigned int width, unsigned int height)
 {
     // Clear to black
     memset(pixels, 0, width * height * 4);
@@ -56,8 +78,8 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
     #endif
     for (int index = 0; index < _countof(g_mesh); ++index)
     {
-        screenPoints[index].x = g_mesh[index].x * float(width);
-        screenPoints[index].y = g_mesh[index].y * float(height);
+        screenPoints[index].x = g_mesh[index].pos.x * float(width);
+        screenPoints[index].y = g_mesh[index].pos.y * float(height);
     }
 
     // rasterize
@@ -68,20 +90,17 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
     {
         for (int ix = 0; ix < (int)width; ++ix)
         {
+            int pixelIndex = iy * width + ix;
+
             for (int triangleIndex = 0; triangleIndex < _countof(g_mesh) / 3; ++triangleIndex)
             {
+                float newCoverage = SoftCoverage(Point2D{ float(ix), float(iy) }, screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2]);
+                gBuffer[pixelIndex].coverage = std::max(gBuffer[pixelIndex].coverage, newCoverage);
 
-                if (ix == (width/2) && iy == (height / 2))
-                {
-                    int ijkl = 0;
-                }
-
-                float coverage = SoftCoverage(Point2D{ float(ix), float(iy) }, screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2]);
-
-                pixels[((iy * width) + ix) * 4 + 0] = (unsigned char)Clamp<int>((int)(coverage * 255.0f), 0, 255);
-                pixels[((iy * width) + ix) * 4 + 1] = 0;
-                pixels[((iy * width) + ix) * 4 + 2] = 0;
-                pixels[((iy * width) + ix) * 4 + 3] = 255;
+                pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp<int>((int)(gBuffer[pixelIndex].coverage * 255.0f), 0, 255);
+                pixels[pixelIndex * 4 + 1] = 0;
+                pixels[pixelIndex * 4 + 2] = 0;
+                pixels[pixelIndex * 4 + 3] = 255;
             }
         }
     }
@@ -93,10 +112,14 @@ int main(int argc, char** argv)
     if (!pixels)
         return 1;
 
-    // Go until window is closed or escape is pressed
+    std::vector<GBuffer> gBuffer(Thirteen::GetWidth() * Thirteen::GetHeight());
+
     while (Thirteen::Render() && !Thirteen::GetKey(VK_ESCAPE))
     {
-        RasterizeMesh(pixels, Thirteen::GetWidth(), Thirteen::GetHeight());
+        RasterizeMesh(pixels, gBuffer.data(), Thirteen::GetWidth(), Thirteen::GetHeight());
+
+        if (Thirteen::GetKey('V') && !Thirteen::GetKeyLastFrame('V'))
+            Thirteen::SetVSync(!Thirteen::GetVSync());
     }
 
     Thirteen::Shutdown();
