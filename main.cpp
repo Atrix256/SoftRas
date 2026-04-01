@@ -38,9 +38,9 @@ Vertex g_mesh[] =
     { {0.6f, 0.3f}, {0.0f, 1.0f, 0.0f} },
     { {0.6f, 0.6f}, {0.0f, 0.0f, 1.0f} },
 
-    //{ {0.1f, 0.1f}, {1.0f, 0.0f, 0.0f} },
-    //{ {0.2f, 0.1f}, {0.0f, 1.0f, 0.0f} },
-    //{ {0.2f, 0.2f}, {0.0f, 0.0f, 1.0f} },
+    { {0.1f, 0.1f}, {1.0f, 0.0f, 0.0f} },
+    { {0.2f, 0.1f}, {0.0f, 1.0f, 0.0f} },
+    { {0.2f, 0.2f}, {0.0f, 0.0f, 1.0f} },
 };
 
 float CrossProduct2D(float x1, float y1, float x2, float y2)
@@ -143,12 +143,22 @@ void RasterizeMesh(unsigned char* pixels, GBuffer* gBuffer, unsigned int width, 
                 float newCoverage = SoftCoverage({ float(ix), float(iy) }, screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2]);
                 gb.coverage = std::max(gb.coverage, newCoverage);
 
-                // TODO: need uvw barycentic coordinates
                 Point3D uvw = CalculateBarycentricCoordinates(screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2], Point2D{ float(ix), float(iy) });
 
-                uvw = Clamp(uvw, 0.0f, 1.0f) * gb.coverage;
+                // The paper says they clamp uvw between 0 and 1 and then they renormalize it to sum to 1
+                bool clampedU = (uvw.x < 0.0f || uvw.x > 1.0f);
+                bool clampedV = (uvw.y < 0.0f || uvw.y > 1.0f);
+                bool clampedW = (uvw.z < 0.0f || uvw.z > 1.0f);
+                uvw = Clamp(uvw, 0.0f, 1.0f);
+                if (!clampedU)
+                    uvw.x = 1.0f - uvw.y - uvw.z;
+                else if (!clampedV)
+                    uvw.y = 1.0f - uvw.x - uvw.z;
+                else
+                    uvw.z = 1.0f - uvw.x - uvw.y;
 
-                Point3D color =  vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z;
+                // TODO: not sure about this bit. need to deal with separate depth layers.
+                Point3D color = (vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z) * gb.coverage;
 
                 pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(color.x * 255.0f, 0.0f, 255.0f);
                 pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(color.y * 255.0f, 0.0f, 255.0f);
