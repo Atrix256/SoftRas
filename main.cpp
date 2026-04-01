@@ -17,11 +17,12 @@
 
 #define MULTI_THREADED() 0 // TODO: turn to true when working
 
-static const float c_epsilon = 3.0f; // TODO: paper uses 1x10^-4. what should we use?
+static const float c_sigma = 3.0f; // TODO: paper uses 1x10^-4. what should we use?
 
 struct GBuffer
 {
     float coverage = 0.0f;
+    Point3D color = { 0.0f, 0.0f, 0.0f };
 };
 
 struct Vertex
@@ -34,13 +35,52 @@ struct Vertex
 Vertex g_mesh[] =
 {
     { {0.3f, 0.3f}, {1.0f, 0.0f, 0.0f} },
-    { {0.6f, 0.3f}, {1.0f, 0.0f, 0.0f} },
-    { {0.6f, 0.6f}, {1.0f, 0.0f, 0.0f} },
+    { {0.6f, 0.3f}, {0.0f, 1.0f, 0.0f} },
+    { {0.6f, 0.6f}, {0.0f, 0.0f, 1.0f} },
 
-    { {0.1f, 0.1f}, {1.0f, 0.0f, 0.0f} },
-    { {0.2f, 0.1f}, {0.0f, 1.0f, 0.0f} },
-    { {0.2f, 0.2f}, {0.0f, 0.0f, 1.0f} },
+    //{ {0.1f, 0.1f}, {1.0f, 0.0f, 0.0f} },
+    //{ {0.2f, 0.1f}, {0.0f, 1.0f, 0.0f} },
+    //{ {0.2f, 0.2f}, {0.0f, 0.0f, 1.0f} },
 };
+
+float CrossProduct2D(float x1, float y1, float x2, float y2)
+{
+    return x1 * y2 - x2 * y1;
+}
+
+// TODO: i think we can calculate this in sdTriangle
+Point3D CalculateBarycentricCoordinates(Point2D A, Point2D B, Point2D C, Point2D P)
+{
+    Point3D ret;
+    float& u = ret.x;
+    float& v = ret.y;
+    float& w = ret.z;
+
+    // Vectors for the full triangle
+    float ax = B.x - A.x;
+    float ay = B.y - A.y;
+    float bx = C.x - A.x;
+    float by = C.y - A.y;
+
+    // Vectors for the point P relative to A
+    float px = P.x - A.x;
+    float py = P.y - A.y;
+
+    float totalArea = CrossProduct2D(ax, ay, bx, by);
+
+    // Check for a degenerate triangle
+    if (std::abs(totalArea) < 1e-9) {
+        u = v = w = 0.0f;
+        return ret;
+    }
+
+    // Calculate the coordinates
+    v = CrossProduct2D(px, py, bx, by) / totalArea; // Weight for B
+    w = CrossProduct2D(ax, ay, px, py) / totalArea; // Weight for C
+    u = 1.0f - v - w;                               // Weight for A
+
+    return ret;
+}
 
 // Triangle SDF from https://iquilezles.org/articles/distfunctions2d/
 // Returns positive values if outside the triangle, negative values if inside the triangle
@@ -62,7 +102,7 @@ float SoftCoverage(const Point2D& P, const Point2D& A, const Point2D& B, const P
 {
     // Equation 1
     float sdf = -sdTriangle(P, A, B, C);
-    return Sigmoid(Sign(sdf) * sdf * sdf / c_epsilon);
+    return Sigmoid(Sign(sdf) * sdf * sdf / c_sigma);
 }
 
 void RasterizeMesh(unsigned char* pixels, GBuffer* gBuffer, unsigned int width, unsigned int height)
@@ -94,12 +134,25 @@ void RasterizeMesh(unsigned char* pixels, GBuffer* gBuffer, unsigned int width, 
 
             for (int triangleIndex = 0; triangleIndex < _countof(g_mesh) / 3; ++triangleIndex)
             {
-                float newCoverage = SoftCoverage(Point2D{ float(ix), float(iy) }, screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2]);
-                gBuffer[pixelIndex].coverage = std::max(gBuffer[pixelIndex].coverage, newCoverage);
+                GBuffer& gb = gBuffer[pixelIndex];
 
-                pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp<int>((int)(gBuffer[pixelIndex].coverage * 255.0f), 0, 255);
-                pixels[pixelIndex * 4 + 1] = 0;
-                pixels[pixelIndex * 4 + 2] = 0;
+                const Vertex& vA = g_mesh[triangleIndex * 3 + 0];
+                const Vertex& vB = g_mesh[triangleIndex * 3 + 1];
+                const Vertex& vC = g_mesh[triangleIndex * 3 + 2];
+
+                float newCoverage = SoftCoverage({ float(ix), float(iy) }, screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2]);
+                gb.coverage = std::max(gb.coverage, newCoverage);
+
+                // TODO: need uvw barycentic coordinates
+                Point3D uvw = CalculateBarycentricCoordinates(screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2], Point2D{ float(ix), float(iy) });
+
+                uvw = Clamp(uvw, 0.0f, 1.0f) * gb.coverage;
+
+                Point3D color =  vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z;
+
+                pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(color.x * 255.0f, 0.0f, 255.0f);
+                pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(color.y * 255.0f, 0.0f, 255.0f);
+                pixels[pixelIndex * 4 + 2] = (unsigned char)Clamp(color.z * 255.0f, 0.0f, 255.0f);
                 pixels[pixelIndex * 4 + 3] = 255;
             }
         }

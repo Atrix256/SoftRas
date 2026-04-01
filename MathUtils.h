@@ -43,6 +43,8 @@ inline float Sign(float f)
         return 0.0f;
 }
 
+// =========================== Point2D
+
 inline float Dot(const Point2D& A, const Point2D& B)
 {
     return A.x * B.x + A.y * B.y;
@@ -82,3 +84,32 @@ namespace std
         return ret;
     }
 };
+
+// =========================== Point3D
+
+inline Point3D operator+ (const Point3D& A, const Point3D& B)
+{
+    Point3D ret;
+    ret.x = A.x + B.x;
+    ret.y = A.y + B.y;
+    ret.z = A.z + B.z;
+    return ret;
+}
+
+inline Point3D operator* (const Point3D& A, float B)
+{
+    Point3D ret;
+    ret.x = A.x * B;
+    ret.y = A.y * B;
+    ret.z = A.z * B;
+    return ret;
+}
+
+inline Point3D Clamp(const Point3D& A, float theMin, float theMax)
+{
+    Point3D ret;
+    ret.x = Clamp(A.x, theMin, theMax);
+    ret.y = Clamp(A.y, theMin, theMax);
+    ret.z = Clamp(A.z, theMin, theMax);
+    return ret;
+}
