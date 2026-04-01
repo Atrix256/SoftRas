@@ -105,7 +105,7 @@ float SoftCoverage(const Point2D& P, const Point2D& A, const Point2D& B, const P
     return Sigmoid(Sign(sdf) * sdf * sdf / c_sigma);
 }
 
-void RasterizeMesh(unsigned char* pixels, GBuffer* gBuffer, unsigned int width, unsigned int height)
+void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigned int width, unsigned int height)
 {
     // Clear to black
     memset(pixels, 0, width * height * 4);
@@ -132,8 +132,8 @@ void RasterizeMesh(unsigned char* pixels, GBuffer* gBuffer, unsigned int width, 
         {
             int pixelIndex = iy * width + ix;
 
-            GBuffer& gb = gBuffer[pixelIndex];
-            gb = GBuffer();
+            std::vector<GBuffer>& gb = gBuffer[pixelIndex];
+            gb.resize(0);
 
             // TODO: temp
             if (Thirteen::GetMouseButton(0) && !Thirteen::GetMouseButtonLastFrame(0))
@@ -148,12 +148,13 @@ void RasterizeMesh(unsigned char* pixels, GBuffer* gBuffer, unsigned int width, 
 
             for (int triangleIndex = 0; triangleIndex < _countof(g_mesh) / 3; ++triangleIndex)
             {
+                GBuffer newGB;
+
                 const Vertex& vA = g_mesh[triangleIndex * 3 + 0];
                 const Vertex& vB = g_mesh[triangleIndex * 3 + 1];
                 const Vertex& vC = g_mesh[triangleIndex * 3 + 2];
 
-                float newCoverage = SoftCoverage({ float(ix), float(iy) }, screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2]);
-                gb.coverage = std::max(gb.coverage, newCoverage);
+                newGB.coverage = SoftCoverage({ float(ix), float(iy) }, screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2]);
 
                 Point3D uvw = CalculateBarycentricCoordinates(screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2], Point2D{ float(ix), float(iy) });
 
@@ -169,14 +170,19 @@ void RasterizeMesh(unsigned char* pixels, GBuffer* gBuffer, unsigned int width, 
                 else
                     uvw.z = 1.0f - uvw.x - uvw.y;
 
-                // TODO: this stuff next. need to deal with separate depth layers.
-                Point3D color = (vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z) * gb.coverage;
-                gb.color = color;
+                newGB.color = (vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z) * newGB.coverage;
+                gb.push_back(newGB);
             }
 
-            pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(gb.color.x * 255.0f, 0.0f, 255.0f);
-            pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(gb.color.y * 255.0f, 0.0f, 255.0f);
-            pixels[pixelIndex * 4 + 2] = (unsigned char)Clamp(gb.color.z * 255.0f, 0.0f, 255.0f);
+            if (gb.size() > 0)
+            {
+                // TODO: need to do the multi layer stuff
+                GBuffer& entry = gb[0];
+                pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(entry.color.x * 255.0f, 0.0f, 255.0f);
+                pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(entry.color.y * 255.0f, 0.0f, 255.0f);
+                pixels[pixelIndex * 4 + 2] = (unsigned char)Clamp(entry.color.z * 255.0f, 0.0f, 255.0f);
+            }
+
             pixels[pixelIndex * 4 + 3] = 255;
         }
     }
@@ -188,7 +194,7 @@ int main(int argc, char** argv)
     if (!pixels)
         return 1;
 
-    std::vector<GBuffer> gBuffer(Thirteen::GetWidth() * Thirteen::GetHeight());
+    std::vector<std::vector<GBuffer>> gBuffer(Thirteen::GetWidth() * Thirteen::GetHeight());
 
     while (Thirteen::Render() && !Thirteen::GetKey(VK_ESCAPE))
     {
