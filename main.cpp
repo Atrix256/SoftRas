@@ -92,9 +92,15 @@ float sdTriangle(const Point2D& p, const Point2D& p0, const Point2D& p1, const P
     Point2D pq1 = v1 - e1 * Clamp(Dot(v1, e1) / Dot(e1, e1), 0.0f, 1.0f);
     Point2D pq2 = v2 - e2 * Clamp(Dot(v2, e2) / Dot(e2, e2), 0.0f, 1.0f);
     float s = Sign(e0.x * e2.y - e0.y * e2.x);
-    Point2D d = std::min(std::min(Point2D(Dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)),
-        Point2D(Dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x))),
-        Point2D(Dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)));
+    Point2D d =
+        std::min(
+            std::min(
+                Point2D{ Dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x) },
+                Point2D{ Dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x) }
+            ),
+            Point2D{ Dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x) }
+        )
+    ;
     return -sqrt(d.x) * Sign(d.y);
 }
 
@@ -159,16 +165,11 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
                 Point3D uvw = CalculateBarycentricCoordinates(screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2], Point2D{ float(ix), float(iy) });
 
                 // The paper says they clamp uvw between 0 and 1 and then they renormalize it to sum to 1
-                bool clampedU = (uvw.x < 0.0f || uvw.x > 1.0f);
-                bool clampedV = (uvw.y < 0.0f || uvw.y > 1.0f);
-                bool clampedW = (uvw.z < 0.0f || uvw.z > 1.0f);
                 uvw = Clamp(uvw, 0.0f, 1.0f);
-                if (!clampedU)
-                    uvw.x = 1.0f - uvw.y - uvw.z;
-                else if (!clampedV)
-                    uvw.y = 1.0f - uvw.x - uvw.z;
-                else
-                    uvw.z = 1.0f - uvw.x - uvw.y;
+				float sum = uvw.x + uvw.y + uvw.z;
+				uvw.x /= sum;
+				uvw.y /= sum;
+				uvw.z /= sum;
 
                 newGB.color = (vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z) * newGB.coverage;
                 gb.push_back(newGB);
