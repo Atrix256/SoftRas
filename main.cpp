@@ -19,28 +19,35 @@
 
 static const float c_sigma = 3.0f; // TODO: paper uses 1x10^-4. what should we use?
 
+// Constants from equation 3
+static const float c_epsilon = 1e-4f; // TODO: this is not specified in the paper
+static const float c_gamma = 1e-4f;
+
+static const Point3D c_backgroundColor = { 0.2f, 0.2f, 0.2f };
+
 struct GBuffer
 {
     float coverage = 0.0f;
+    float depth = 0.0f;
     Point3D color = { 0.0f, 0.0f, 0.0f };
 };
 
 struct Vertex
 {
-    Point2D pos;
+    Point3D pos;
     Point3D color;
 };
 
 // In UV space
 Vertex g_mesh[] =
 {
-    { {0.3f, 0.3f}, {1.0f, 0.0f, 0.0f} },
-    { {0.6f, 0.3f}, {0.0f, 1.0f, 0.0f} },
-    { {0.6f, 0.6f}, {0.0f, 0.0f, 1.0f} },
+    { {0.3f, 0.3f, 0.001f}, {1.0f, 0.0f, 0.0f} },
+    { {0.6f, 0.3f, 0.001f}, {0.0f, 1.0f, 0.0f} },
+    { {0.6f, 0.6f, 0.001f}, {0.0f, 0.0f, 1.0f} },
 
-    { {0.1f, 0.1f}, {1.0f, 0.0f, 0.0f} },
-    { {0.2f, 0.1f}, {0.0f, 1.0f, 0.0f} },
-    { {0.2f, 0.2f}, {0.0f, 0.0f, 1.0f} },
+    { {0.1f, 0.1f, 0.002f}, {1.0f, 0.0f, 0.0f} },
+    { {0.2f, 0.1f, 0.002f}, {0.0f, 1.0f, 0.0f} },
+    { {0.2f, 0.2f, 0.002f}, {0.0f, 0.0f, 1.0f} },
 };
 
 float CrossProduct2D(float x1, float y1, float x2, float y2)
@@ -141,7 +148,7 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
             std::vector<GBuffer>& gb = gBuffer[pixelIndex];
             gb.resize(0);
 
-            // TODO: temp
+            // TODO: temp. Or maybe leave this! it makes a breakpoint on the pixel that you click
             if (Thirteen::GetMouseButton(0) && !Thirteen::GetMouseButtonLastFrame(0))
             {
                 int mouseX, mouseY;
@@ -151,6 +158,8 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
                     int ijkl = 0;
                 }
             }
+
+            // TODO: may not need to store all gbuffer entries, but just calculate gradients right here per pixel and store those, with the final color.
 
             for (int triangleIndex = 0; triangleIndex < _countof(g_mesh) / 3; ++triangleIndex)
             {
@@ -171,19 +180,34 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
 				uvw.y /= sum;
 				uvw.z /= sum;
 
-                newGB.color = (vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z) * newGB.coverage;
+                newGB.color = (vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z);
+                newGB.depth = (vA.pos.z * uvw.x + vB.pos.z * uvw.y + vC.pos.z * uvw.z);
+
                 gb.push_back(newGB);
             }
 
-            if (gb.size() > 0)
+			Point3D pixelColor = { 0.0f, 0.0f, 0.0f };
+
+            // Calculate the denominator in equation 3
+            float weightDenom = std::exp(c_epsilon / c_gamma);
+            for (const GBuffer& entry : gb)
+                weightDenom += entry.coverage * std::exp(entry.depth / c_gamma);
+
+            // Calculate equation 2
+			float totalWeight = 0.0f;
+            for (const GBuffer& entry : gb)
             {
-                // TODO: need to do the multi layer stuff
-                GBuffer& entry = gb[0];
-                pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(entry.color.x * 255.0f, 0.0f, 255.0f);
-                pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(entry.color.y * 255.0f, 0.0f, 255.0f);
-                pixels[pixelIndex * 4 + 2] = (unsigned char)Clamp(entry.color.z * 255.0f, 0.0f, 255.0f);
+				float weight = entry.coverage * std::exp(entry.depth / c_gamma) / weightDenom;
+				pixelColor = pixelColor + entry.color * weight;
+				totalWeight += weight;
             }
 
+			float backgroundWeight = 1.0f - totalWeight;
+			pixelColor = pixelColor + c_backgroundColor * backgroundWeight;
+
+            pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(pixelColor.x * 255.0f, 0.0f, 255.0f);
+            pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(pixelColor.y * 255.0f, 0.0f, 255.0f);
+            pixels[pixelIndex * 4 + 2] = (unsigned char)Clamp(pixelColor.z * 255.0f, 0.0f, 255.0f);
             pixels[pixelIndex * 4 + 3] = 255;
         }
     }
