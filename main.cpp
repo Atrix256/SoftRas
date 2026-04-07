@@ -26,6 +26,8 @@ static const float c_gamma = 1e-4f;
 static const float c_nearPlane = 0.1f;
 static const float c_farPlane = 100.0f;
 
+static const float c_minimumCoverage = 1e-6f;
+
 static const Point3D c_backgroundColor = { 0.2f, 0.2f, 0.2f };
 
 struct GBuffer
@@ -186,6 +188,9 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
 
                 newGB.coverage = SoftCoverage(pixelNormed, sA2DNormed, sB2DNormed, sC2DNormed);
 
+                if (newGB.coverage < c_minimumCoverage)
+                    continue;
+
                 Point3D uvw = CalculateBarycentricCoordinates(sA2DNormed, sB2DNormed, sC2DNormed, pixelNormed);
 
                 // The paper says they clamp uvw between 0 and 1 and then they renormalize it to sum to 1
@@ -202,19 +207,28 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
             }
 
             Point3D pixelColor = { 0.0f, 0.0f, 0.0f };
-
-            // Calculate the denominator in equation 3
-            float weightDenom = std::exp(c_epsilon / c_gamma);
-            for (const GBuffer& entry : gb)
-                weightDenom += entry.coverage * std::exp(entry.depth / c_gamma);
-
-            // Calculate equation 2
             float totalWeight = 0.0f;
-            for (const GBuffer& entry : gb)
+
+            // If this pixel is covered by any triangles
+            if (gb.size() > 0)
             {
-                float weight = entry.coverage * std::exp(entry.depth / c_gamma) / weightDenom;
-                pixelColor = pixelColor + entry.color * weight;
-                totalWeight += weight;
+                // Track the max exponent across all triangles
+                float softmax_max = c_epsilon / c_gamma;  // from background term
+                for (const GBuffer& entry : gb)
+                    softmax_max = std::max(softmax_max, entry.depth / c_gamma);
+
+                // Compute denominator with max subtracted (numerically stable)
+                float weightDenom = std::exp(c_epsilon / c_gamma - softmax_max);
+                for (const GBuffer& entry : gb)
+                    weightDenom += entry.coverage * std::exp(entry.depth / c_gamma - softmax_max);
+
+                // Weights — the softmax_max cancels in numerator/denominator
+                for (const GBuffer& entry : gb)
+                {
+                    float weight = entry.coverage * std::exp(entry.depth / c_gamma - softmax_max) / weightDenom;
+                    pixelColor = pixelColor + entry.color * weight;
+                    totalWeight += weight;
+                }
             }
 
             float backgroundWeight = 1.0f - totalWeight;
