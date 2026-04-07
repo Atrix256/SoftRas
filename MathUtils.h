@@ -3,12 +3,19 @@
 #include <cmath>
 #include <array>
 
+static const float c_pi = 3.14159265359f;
+
 template <size_t N>
 using Vec = std::array<float, N>;
+
+template <size_t M, size_t N>
+using Mat = std::array<std::array<float, N>, M>;
 
 using Vec2 = Vec<2>;
 using Vec3 = Vec<3>;
 using Vec4 = Vec<4>;
+
+using Mat4x4 = Mat<4, 4>;
 
 // Returns 2 times the signed triangle area. The result is positive if
 // abc is ccw, negative if abc is cw, zero if abc is degenerate.
@@ -44,7 +51,7 @@ T Clamp(T value, T theMin, T theMax)
 }
 
 template <size_t N>
-inline Vec<N> Clamp(const Vec<N>& A, float theMin, float theMax)
+Vec<N> Clamp(const Vec<N>& A, float theMin, float theMax)
 {
     Vec<N> ret;
     for (size_t i = 0; i < N; ++i)
@@ -52,10 +59,17 @@ inline Vec<N> Clamp(const Vec<N>& A, float theMin, float theMax)
     return ret;
 }
 
-// Vec / Vec
+template <size_t N>
+Vec2 XY(const Vec<N>& A)
+{
+    static_assert(N >= 2, "Vec must have at least 2 components");
+    return Vec2{ A[0], A[1] };
+}
+
+// ======================================= Vec / Vec
 
 template <size_t N>
-inline float Dot(const Vec<N>& A, const Vec<N>& B)
+float Dot(const Vec<N>& A, const Vec<N>& B)
 {
     float result = 0.0f;
     for (size_t i = 0; i < N; ++i)
@@ -64,7 +78,7 @@ inline float Dot(const Vec<N>& A, const Vec<N>& B)
 }
 
 template <size_t N>
-inline Vec<N> operator+ (const Vec<N>& A, const Vec<N>& B)
+Vec<N> operator+ (const Vec<N>& A, const Vec<N>& B)
 {
     Vec<N> ret;
     for (size_t i = 0; i < N; ++i)
@@ -73,7 +87,7 @@ inline Vec<N> operator+ (const Vec<N>& A, const Vec<N>& B)
 }
 
 template <size_t N>
-inline Vec<N> operator- (const Vec<N>& A, const Vec<N>& B)
+Vec<N> operator- (const Vec<N>& A, const Vec<N>& B)
 {
     Vec<N> ret;
     for (size_t i = 0; i < N; ++i)
@@ -82,7 +96,7 @@ inline Vec<N> operator- (const Vec<N>& A, const Vec<N>& B)
 }
 
 template <size_t N>
-inline Vec<N> operator* (const Vec<N>& A, const Vec<N>& B)
+Vec<N> operator* (const Vec<N>& A, const Vec<N>& B)
 {
     Vec<N> ret;
     for (size_t i = 0; i < N; ++i)
@@ -91,7 +105,7 @@ inline Vec<N> operator* (const Vec<N>& A, const Vec<N>& B)
 }
 
 template <size_t N>
-inline Vec<N> operator/ (const Vec<N>& A, const Vec<N>& B)
+Vec<N> operator/ (const Vec<N>& A, const Vec<N>& B)
 {
     Vec<N> ret;
     for (size_t i = 0; i < N; ++i)
@@ -99,10 +113,40 @@ inline Vec<N> operator/ (const Vec<N>& A, const Vec<N>& B)
     return ret;
 }
 
-// Vec / Scalar
+namespace std
+{
+    template <size_t N>
+    Vec<N> min(const Vec<N>& A, const Vec<N>& B)
+    {
+        Vec<N> ret;
+        for (size_t i = 0; i < N; ++i)
+            ret[i] = std::min(A[i], B[i]);
+        return ret;
+    }
+};
+
+// ======================================= Vec / Scalar
 
 template <size_t N>
-inline Vec<N> operator* (const Vec<N>& A, float B)
+Vec<N> operator+ (const Vec<N>& A, float B)
+{
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A[i] + B;
+    return ret;
+}
+
+template <size_t N>
+Vec<N> operator- (const Vec<N>& A, float B)
+{
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A[i] - B;
+    return ret;
+}
+
+template <size_t N>
+Vec<N> operator* (const Vec<N>& A, float B)
 {
     Vec<N> ret;
     for (size_t i = 0; i < N; ++i)
@@ -111,24 +155,60 @@ inline Vec<N> operator* (const Vec<N>& A, float B)
 }
 
 template <size_t N>
-inline Vec<N> operator+ (const Vec<N>& A, float B)
+Vec<N> operator/ (const Vec<N>& A, float B)
 {
     Vec<N> ret;
     for (size_t i = 0; i < N; ++i)
-        ret[i] = A[i] + B;
+        ret[i] = A[i] / B;
     return ret;
 }
 
-// Other
+// ======================================= Vec / Matrix
 
-namespace std
+template <size_t N>
+Vec<N> MatMul(const Vec<N>& A, const Mat<N, N>& B)
 {
-    template <size_t N>
-    inline Vec<N> min(const Vec<N>& A, const Vec<N>& B)
+    Vec<N> ret;
+    for (int i = 0; i < N; ++i)
     {
-        Vec<N> ret;
-        for (size_t i = 0; i < N; ++i)
-            ret[i] = std::min(A[i], B[i]);
-        return ret;
+        ret[i] = 0.0f;
+        for (int j = 0; j < N; ++j)
+            ret[i] += A[j] * B[i][j];
     }
-};
+    return ret;
+}
+
+// ======================================= Matrix
+
+inline Mat4x4 PerspectiveFovLH_ReverseZ_InfiniteDepth(float FovAngleYDegrees, float AspectRatio, float NearZ, bool leftHanded)
+{
+    float FovAngleY = FovAngleYDegrees * c_pi / 180.0f;
+
+    float SinFov = sin(0.5f * FovAngleY);
+    float CosFov = cos(0.5f * FovAngleY);
+
+    float Height = CosFov / SinFov;
+    float Width = Height / AspectRatio;
+
+    Mat4x4 ret;
+    ret[0][0] = Width;
+    ret[0][1] = 0.0f;
+    ret[0][2] = 0.0f;
+    ret[0][3] = 0.0f;
+
+    ret[1][0] = 0.0f;
+    ret[1][1] = Height;
+    ret[1][2] = 0.0f;
+    ret[1][3] = 0.0f;
+
+    ret[2][0] = 0.0f;
+    ret[2][1] = 0.0f;
+    ret[2][2] = 0.0f;
+    ret[2][3] = leftHanded ? 1.0f : -1.0f;
+
+    ret[3][0] = 0.0f;
+    ret[3][1] = 0.0f;
+    ret[3][2] = NearZ;
+    ret[3][3] = 0.0f;
+    return ret;
+}

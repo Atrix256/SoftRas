@@ -17,18 +17,23 @@
 
 #define MULTI_THREADED() 0 // TODO: turn to true when working
 
+static const int c_width = 800;
+static const int c_height = 600;
+
+static const float c_nearPlane = 1.0f;
+static const bool c_leftHandedProjection = true;
+
+static const Vec3 c_backgroundColor = { 0.2f, 0.2f, 0.2f };
+
+// Constants from equation 1s
 static const float c_sigma = 1e-5f;
 
 // Constants from equation 3
 static const float c_epsilon = 1e-3f;
 static const float c_gamma = 1e-4f;
 
-static const float c_nearPlane = 1.0f;
-static const float c_farPlane = 100.0f;
-
+// Used to keep equations stable. The minimum amount of coverage of a pixel to be considered covered by a triangle.
 static const float c_minimumCoverage = 1e-4f;
-
-static const Vec3 c_backgroundColor = { 0.2f, 0.2f, 0.2f };
 
 struct Vertex
 {
@@ -49,7 +54,6 @@ float CrossProduct2D(float x1, float y1, float x2, float y2)
     return x1 * y2 - x2 * y1;
 }
 
-// TODO: i think we can calculate this in sdTriangle
 Vec3 CalculateBarycentricCoordinates(Vec2 A, Vec2 B, Vec2 C, Vec2 P)
 {
     Vec3 ret;
@@ -112,7 +116,15 @@ float SoftCoverage(const Vec2& P, const Vec2& A, const Vec2& B, const Vec2& C)
     return Sigmoid(Sign(sdf) * sdf * sdf / c_sigma);
 }
 
-void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int height, const std::vector<Vertex>& mesh, const float viewProjMtx[16])
+Vec2 PixelToClip(int ix, int iy)
+{
+    // Convert pixel coordinates to normalized device coordinates (NDC)
+    float x_ndc = (float(ix) + 0.5f) / float(c_width) * 2.0f - 1.0f;
+    float y_ndc = 1.0f - (float(iy) + 0.5f) / float(c_height) * 2.0f; // Invert Y for screen space
+    return Vec2{ x_ndc, y_ndc };
+}
+
+void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int height, const std::vector<Vertex>& mesh, const Mat4x4& viewProjMtx)
 {
     // Clear to black
     memset(pixels, 0, width * height * 4);
@@ -125,9 +137,13 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
     #endif
     for (int index = 0; index < mesh.size(); ++index)
     {
-        screenPoints[index][0] = mesh[index].pos[0] * float(width);
-        screenPoints[index][1] = mesh[index].pos[1] * float(height);
-        screenPoints[index][2] = (c_farPlane - mesh[index].pos[2]) / (c_farPlane - c_nearPlane);
+        Vec4 src = Vec4{ mesh[index].pos[0], mesh[index].pos[1], mesh[index].pos[2], 1.0f };
+        Vec4 pos = MatMul(src, viewProjMtx);
+        pos = pos / pos[3]; // perspective divide
+
+        screenPoints[index][0] = pos[0];
+        screenPoints[index][1] = pos[1];
+        screenPoints[index][2] = pos[2];
     }
 
     // rasterize
@@ -149,14 +165,17 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
             pxInfo.clear();
             int pixelIndex = iy * width + ix;
 
-            // If you want to debug a specific pixel, turn off MULTI_THREADED(), put a breakpoint in here, and click the pixel you want to debug.
-            if (Thirteen::GetMouseButton(0) && !Thirteen::GetMouseButtonLastFrame(0))
+            // If you want to debug a specific pixel, turn off MULTI_THREADED() and click middle mouse button on the pixel to debug.
+            if (Thirteen::GetMouseButton(2) && !Thirteen::GetMouseButtonLastFrame(2))
             {
                 int mouseX, mouseY;
                 Thirteen::GetMousePosition(mouseX, mouseY);
                 if (ix == mouseX && iy == mouseY)
                 {
-                    int ijkl = 0;
+                    if (IsDebuggerPresent())
+                    {
+                        __debugbreak();
+                    }
                 }
             }
 
@@ -174,17 +193,14 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
 
                 const Vec2 resolution = Vec2{ float(width), float(height) };
 
-                Vec2 sA2DNormed = (Vec2{ sA[0], sA[1]} + 0.5f) / resolution;
-                Vec2 sB2DNormed = (Vec2{ sB[0], sB[1]} + 0.5f) / resolution;
-                Vec2 sC2DNormed = (Vec2{ sC[0], sC[1]} + 0.5f) / resolution;
-                Vec2 pixelNormed = (Vec2{ float(ix), float(iy) } + 0.5f) / resolution;
+                Vec2 pxClip = PixelToClip(ix, iy);
 
-                newPx.coverage = SoftCoverage(pixelNormed, sA2DNormed, sB2DNormed, sC2DNormed);
+                newPx.coverage = SoftCoverage(XY(pxClip), XY(sA), XY(sB), XY(sC));
 
                 if (newPx.coverage < c_minimumCoverage)
                     continue;
 
-                Vec3 uvw = CalculateBarycentricCoordinates(sA2DNormed, sB2DNormed, sC2DNormed, pixelNormed);
+                Vec3 uvw = CalculateBarycentricCoordinates(XY(sA), XY(sB), XY(sC), XY(pxClip));
 
                 // The paper says they clamp uvw between 0 and 1 and then they renormalize it to sum to 1
                 uvw = Clamp(uvw, 0.0f, 1.0f);
@@ -239,6 +255,10 @@ int main(int argc, char** argv)
 {
     std::vector<Vertex> mesh =
     {
+        { {0.3f, 0.3f, 5.0f}, {0.0f, 1.0f, 1.0f} },
+        { {0.6f, 0.3f, 5.0f}, {0.0f, 1.0f, 1.0f} },
+        { {0.6f, 0.6f, 5.0f}, {0.0f, 1.0f, 1.0f} },
+
         { {0.3f, 0.3f, 10.0f}, {0.0f, 1.0f, 0.0f} },
         { {0.6f, 0.3f, 10.0f}, {0.0f, 1.0f, 0.0f} },
         { {0.6f, 0.6f, 10.0f}, {0.0f, 1.0f, 0.0f} },
@@ -248,21 +268,30 @@ int main(int argc, char** argv)
         { {0.5f, 0.6f, 11.0f}, {1.0f, 0.0f, 0.0f} },
     };
 
-    static const float viewProjMtx[16] =
+    /*
+    FILE* file = nullptr;
+    fopen_s(&file, "Assets/sphere/sphere_642.bin", "rb");
+    if (file)
     {
-        -1.810658f, 0.000000f,  0.002884f, -0.014419f,
-         0.000000f, 2.414213f,  0.000000f,  0.000000f,
-         0.000000f, 0.000000f,  0.000100f,  0.003500f,
-        -0.001593f, 0.000000f, -0.999999f,  4.999994f
-    };
+        fseek(file, 0, SEEK_END);
+        size_t fileSize = ftell(file);
+        fseek(file, 0, SEEK_SET);
+        size_t vertexCount = fileSize / sizeof(Vertex);
+        mesh.resize(vertexCount);
+        fread(mesh.data(), sizeof(Vertex), vertexCount, file);
+        fclose(file);
+    }
+    */
 
-    unsigned char* pixels = Thirteen::Init(800, 600);
+    Mat4x4 viewProjMtx = PerspectiveFovLH_ReverseZ_InfiniteDepth(45.0f, float(c_width) / float(c_height), c_nearPlane, c_leftHandedProjection);
+
+    unsigned char* pixels = Thirteen::Init(c_width, c_height);
     if (!pixels)
         return 1;
 
     while (Thirteen::Render() && !Thirteen::GetKey(VK_ESCAPE))
     {
-        RasterizeMesh(pixels, Thirteen::GetWidth(), Thirteen::GetHeight(), mesh, viewProjMtx);
+        RasterizeMesh(pixels, c_width, c_height, mesh, viewProjMtx);
 
         if (Thirteen::GetKey('V') && !Thirteen::GetKeyLastFrame('V'))
             Thirteen::SetVSync(!Thirteen::GetVSync());
@@ -273,9 +302,10 @@ int main(int argc, char** argv)
 }
 /*
 - viewProjMtx
+- load mesh from file (sphere?)
 - why not semi transparent? review paper?
 - then gradients
-
+- camera controls
 
 
 TODO:
@@ -294,5 +324,7 @@ https://openaccess.thecvf.com/content_ICCV_2019/papers/Liu_Soft_Rasterizer_A_Dif
 
 Link to this for slightly newer methods of differentiable rasterization:
 https://jjbannister.github.io/tinydiffrast/
+
+* softmax wants closer triangles to have a larger value, so i used a reversed z infinite depth projection.
 
 */
