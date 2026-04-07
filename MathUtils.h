@@ -68,11 +68,27 @@ inline Point2D operator* (const Point2D& A, const Point2D& B)
     return ret;
 }
 
+inline Point2D operator/ (const Point2D& A, const Point2D& B)
+{
+    Point2D ret;
+    ret.x = A.x / B.x;
+    ret.y = A.y / B.y;
+    return ret;
+}
+
 inline Point2D operator* (const Point2D& A, float B)
 {
     Point2D ret;
     ret.x = A.x * B;
     ret.y = A.y * B;
+    return ret;
+}
+
+inline Point2D operator+ (const Point2D& A, float B)
+{
+    Point2D ret;
+    ret.x = A.x + B;
+    ret.y = A.y + B;
     return ret;
 }
 

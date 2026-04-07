@@ -17,11 +17,14 @@
 
 #define MULTI_THREADED() 0 // TODO: turn to true when working
 
-static const float c_sigma = 3.0f; // TODO: paper uses 1x10^-4. what should we use?
+static const float c_sigma = 1e-4f;
 
 // Constants from equation 3
 static const float c_epsilon = 1e-4f; // TODO: this is not specified in the paper
 static const float c_gamma = 1e-4f;
+
+static const float c_nearPlane = 0.1f;
+static const float c_farPlane = 100.0f;
 
 static const Point3D c_backgroundColor = { 0.2f, 0.2f, 0.2f };
 
@@ -41,13 +44,13 @@ struct Vertex
 // In UV space
 Vertex g_mesh[] =
 {
-    { {0.3f, 0.3f, 0.001f}, {1.0f, 0.0f, 0.0f} },
-    { {0.6f, 0.3f, 0.001f}, {0.0f, 1.0f, 0.0f} },
-    { {0.6f, 0.6f, 0.001f}, {0.0f, 0.0f, 1.0f} },
+    { {0.3f, 0.3f, 10.0f}, {1.0f, 0.0f, 0.0f} },
+    { {0.6f, 0.3f, 10.0f}, {0.0f, 1.0f, 0.0f} },
+    { {0.6f, 0.6f, 10.0f}, {0.0f, 0.0f, 1.0f} },
 
-    { {0.1f, 0.1f, 0.002f}, {1.0f, 0.0f, 0.0f} },
-    { {0.2f, 0.1f, 0.002f}, {0.0f, 1.0f, 0.0f} },
-    { {0.2f, 0.2f, 0.002f}, {0.0f, 0.0f, 1.0f} },
+    { {0.1f, 0.1f, 20.0f}, {1.0f, 0.0f, 0.0f} },
+    { {0.2f, 0.1f, 20.0f}, {0.0f, 1.0f, 0.0f} },
+    { {0.2f, 0.2f, 20.0f}, {0.0f, 0.0f, 1.0f} },
 };
 
 float CrossProduct2D(float x1, float y1, float x2, float y2)
@@ -124,7 +127,7 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
     memset(pixels, 0, width * height * 4);
 
     // transform the mesh into pixel coordinates
-    static std::vector<Point2D> screenPoints;
+    static std::vector<Point3D> screenPoints;
     screenPoints.resize(_countof(g_mesh));
     #if MULTI_THREADED()
     #pragma omp parallel for
@@ -133,6 +136,7 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
     {
         screenPoints[index].x = g_mesh[index].pos.x * float(width);
         screenPoints[index].y = g_mesh[index].pos.y * float(height);
+        screenPoints[index].z = (c_farPlane - g_mesh[index].pos.z) / (c_farPlane - c_nearPlane);
     }
 
     // rasterize
@@ -169,24 +173,35 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
                 const Vertex& vB = g_mesh[triangleIndex * 3 + 1];
                 const Vertex& vC = g_mesh[triangleIndex * 3 + 2];
 
-                newGB.coverage = SoftCoverage({ float(ix), float(iy) }, screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2]);
+                const Point3D& sA = screenPoints[triangleIndex * 3 + 0];
+                const Point3D& sB = screenPoints[triangleIndex * 3 + 1];
+                const Point3D& sC = screenPoints[triangleIndex * 3 + 2];
 
-                Point3D uvw = CalculateBarycentricCoordinates(screenPoints[triangleIndex * 3 + 0], screenPoints[triangleIndex * 3 + 1], screenPoints[triangleIndex * 3 + 2], Point2D{ float(ix), float(iy) });
+                Point2D resolution = Point2D{ float(width), float(height) };
+
+                Point2D sA2DNormed = (Point2D{ sA.x, sA.y } + 0.5f) / resolution;
+                Point2D sB2DNormed = (Point2D{ sB.x, sB.y } + 0.5f) / resolution;
+                Point2D sC2DNormed = (Point2D{ sC.x, sC.y } + 0.5f) / resolution;
+				Point2D pixelNormed = (Point2D{ float(ix), float(iy) } + 0.5f) / resolution;
+
+                newGB.coverage = SoftCoverage(pixelNormed, sA2DNormed, sB2DNormed, sC2DNormed);
+
+                Point3D uvw = CalculateBarycentricCoordinates(sA2DNormed, sB2DNormed, sC2DNormed, pixelNormed);
 
                 // The paper says they clamp uvw between 0 and 1 and then they renormalize it to sum to 1
                 uvw = Clamp(uvw, 0.0f, 1.0f);
-				float sum = uvw.x + uvw.y + uvw.z;
-				uvw.x /= sum;
-				uvw.y /= sum;
-				uvw.z /= sum;
+                float sum = uvw.x + uvw.y + uvw.z;
+                uvw.x /= sum;
+                uvw.y /= sum;
+                uvw.z /= sum;
 
                 newGB.color = (vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z);
-                newGB.depth = (vA.pos.z * uvw.x + vB.pos.z * uvw.y + vC.pos.z * uvw.z);
+                newGB.depth = (sA.z * uvw.x + sB.z * uvw.y + sC.z * uvw.z);
 
                 gb.push_back(newGB);
             }
 
-			Point3D pixelColor = { 0.0f, 0.0f, 0.0f };
+            Point3D pixelColor = { 0.0f, 0.0f, 0.0f };
 
             // Calculate the denominator in equation 3
             float weightDenom = std::exp(c_epsilon / c_gamma);
@@ -194,16 +209,16 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
                 weightDenom += entry.coverage * std::exp(entry.depth / c_gamma);
 
             // Calculate equation 2
-			float totalWeight = 0.0f;
+            float totalWeight = 0.0f;
             for (const GBuffer& entry : gb)
             {
-				float weight = entry.coverage * std::exp(entry.depth / c_gamma) / weightDenom;
-				pixelColor = pixelColor + entry.color * weight;
-				totalWeight += weight;
+                float weight = entry.coverage * std::exp(entry.depth / c_gamma) / weightDenom;
+                pixelColor = pixelColor + entry.color * weight;
+                totalWeight += weight;
             }
 
-			float backgroundWeight = 1.0f - totalWeight;
-			pixelColor = pixelColor + c_backgroundColor * backgroundWeight;
+            float backgroundWeight = 1.0f - totalWeight;
+            pixelColor = pixelColor + c_backgroundColor * backgroundWeight;
 
             pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(pixelColor.x * 255.0f, 0.0f, 255.0f);
             pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(pixelColor.y * 255.0f, 0.0f, 255.0f);
