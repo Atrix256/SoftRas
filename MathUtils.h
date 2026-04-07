@@ -1,38 +1,20 @@
 #pragma once
 
 #include <cmath>
+#include <array>
 
-struct Point2D
-{
-    float x, y;
-};
+template <size_t N>
+using Vec = std::array<float, N>;
 
-struct Point3D
-{
-    float x, y, z;
-};
-
-struct Point4D
-{
-    float x, y, z, w;
-};
+using Vec2 = Vec<2>;
+using Vec3 = Vec<3>;
+using Vec4 = Vec<4>;
 
 // Returns 2 times the signed triangle area. The result is positive if
 // abc is ccw, negative if abc is cw, zero if abc is degenerate.
-inline float Signed2DTriArea(Point2D a, Point2D b, Point2D c)
+inline float Signed2DTriArea(const Vec2& a, const Vec2& b, const Vec2& c)
 {
-    return (a.x - c.x) * (b.y - c.y) - (a.y - c.y) * (b.x - c.x);
-}
-
-template <typename T>
-T Clamp(T value, T theMin, T theMax)
-{
-    if (value <= theMin)
-        return theMin;
-    else if (value >= theMax)
-        return theMax;
-    else
-        return value;
+    return (a[0] - c[0]) * (b[1] - c[1]) - (a[1] - c[1]) * (b[0] - c[0]);
 }
 
 inline float Sigmoid(float x)
@@ -50,89 +32,103 @@ inline float Sign(float f)
         return 0.0f;
 }
 
-// =========================== Point2D
-
-inline float Dot(const Point2D& A, const Point2D& B)
+template <typename T>
+T Clamp(T value, T theMin, T theMax)
 {
-    return A.x * B.x + A.y * B.y;
+    if (value <= theMin)
+        return theMin;
+    else if (value >= theMax)
+        return theMax;
+    else
+        return value;
 }
 
-inline Point2D operator- (const Point2D& A, const Point2D& B)
+template <size_t N>
+inline Vec<N> Clamp(const Vec<N>& A, float theMin, float theMax)
 {
-    Point2D ret;
-    ret.x = A.x - B.x;
-    ret.y = A.y - B.y;
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = Clamp(A[i], theMin, theMax);
     return ret;
 }
 
-inline Point2D operator* (const Point2D& A, const Point2D& B)
+// Vec / Vec
+
+template <size_t N>
+inline float Dot(const Vec<N>& A, const Vec<N>& B)
 {
-    Point2D ret;
-    ret.x = A.x * B.x;
-    ret.y = A.y * B.y;
+    float result = 0.0f;
+    for (size_t i = 0; i < N; ++i)
+        result += A[i] * B[i];
+    return result;
+}
+
+template <size_t N>
+inline Vec<N> operator+ (const Vec<N>& A, const Vec<N>& B)
+{
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A[i] + B[i];
     return ret;
 }
 
-inline Point2D operator/ (const Point2D& A, const Point2D& B)
+template <size_t N>
+inline Vec<N> operator- (const Vec<N>& A, const Vec<N>& B)
 {
-    Point2D ret;
-    ret.x = A.x / B.x;
-    ret.y = A.y / B.y;
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A[i] - B[i];
     return ret;
 }
 
-inline Point2D operator* (const Point2D& A, float B)
+template <size_t N>
+inline Vec<N> operator* (const Vec<N>& A, const Vec<N>& B)
 {
-    Point2D ret;
-    ret.x = A.x * B;
-    ret.y = A.y * B;
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A[i] * B[i];
     return ret;
 }
 
-inline Point2D operator+ (const Point2D& A, float B)
+template <size_t N>
+inline Vec<N> operator/ (const Vec<N>& A, const Vec<N>& B)
 {
-    Point2D ret;
-    ret.x = A.x + B;
-    ret.y = A.y + B;
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A[i] / B[i];
     return ret;
 }
+
+// Vec / Scalar
+
+template <size_t N>
+inline Vec<N> operator* (const Vec<N>& A, float B)
+{
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A[i] * B;
+    return ret;
+}
+
+template <size_t N>
+inline Vec<N> operator+ (const Vec<N>& A, float B)
+{
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A[i] + B;
+    return ret;
+}
+
+// Other
 
 namespace std
 {
-    inline Point2D min(const Point2D& A, const Point2D& B)
+    template <size_t N>
+    inline Vec<N> min(const Vec<N>& A, const Vec<N>& B)
     {
-        Point2D ret;
-        ret.x = min(A.x, B.x);
-        ret.y = min(A.y, B.y);
+        Vec<N> ret;
+        for (size_t i = 0; i < N; ++i)
+            ret[i] = std::min(A[i], B[i]);
         return ret;
     }
 };
-
-// =========================== Point3D
-
-inline Point3D operator+ (const Point3D& A, const Point3D& B)
-{
-    Point3D ret;
-    ret.x = A.x + B.x;
-    ret.y = A.y + B.y;
-    ret.z = A.z + B.z;
-    return ret;
-}
-
-inline Point3D operator* (const Point3D& A, float B)
-{
-    Point3D ret;
-    ret.x = A.x * B;
-    ret.y = A.y * B;
-    ret.z = A.z * B;
-    return ret;
-}
-
-inline Point3D Clamp(const Point3D& A, float theMin, float theMax)
-{
-    Point3D ret;
-    ret.x = Clamp(A.x, theMin, theMax);
-    ret.y = Clamp(A.y, theMin, theMax);
-    ret.z = Clamp(A.z, theMin, theMax);
-    return ret;
-}

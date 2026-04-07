@@ -28,18 +28,18 @@ static const float c_farPlane = 100.0f;
 
 static const float c_minimumCoverage = 1e-4f;
 
-static const Point3D c_backgroundColor = { 0.2f, 0.2f, 0.2f };
+static const Vec3 c_backgroundColor = { 0.2f, 0.2f, 0.2f };
 
 struct Vertex
 {
-    Point3D pos;
-    Point3D color;
-    Point3D normal;
-    Point4D tangent;
-    Point2D UV0;
-    Point2D UV1;
-    Point2D UV2;
-    Point2D UV3;
+    Vec3 pos;
+    Vec3 color;
+    Vec3 normal;
+    Vec4 tangent;
+    Vec2 UV0;
+    Vec2 UV1;
+    Vec2 UV2;
+    Vec2 UV3;
     int materialID;
     int shapeID;
 };
@@ -50,22 +50,22 @@ float CrossProduct2D(float x1, float y1, float x2, float y2)
 }
 
 // TODO: i think we can calculate this in sdTriangle
-Point3D CalculateBarycentricCoordinates(Point2D A, Point2D B, Point2D C, Point2D P)
+Vec3 CalculateBarycentricCoordinates(Vec2 A, Vec2 B, Vec2 C, Vec2 P)
 {
-    Point3D ret;
-    float& u = ret.x;
-    float& v = ret.y;
-    float& w = ret.z;
+    Vec3 ret;
+    float& u = ret[0];
+    float& v = ret[1];
+    float& w = ret[2];
 
     // Vectors for the full triangle
-    float ax = B.x - A.x;
-    float ay = B.y - A.y;
-    float bx = C.x - A.x;
-    float by = C.y - A.y;
+    float ax = B[0] - A[0];
+    float ay = B[1] - A[1];
+    float bx = C[0] - A[0];
+    float by = C[1] - A[1];
 
     // Vectors for the point P relative to A
-    float px = P.x - A.x;
-    float py = P.y - A.y;
+    float px = P[0] - A[0];
+    float py = P[1] - A[1];
 
     float totalArea = CrossProduct2D(ax, ay, bx, by);
 
@@ -85,27 +85,27 @@ Point3D CalculateBarycentricCoordinates(Point2D A, Point2D B, Point2D C, Point2D
 
 // Triangle SDF from https://iquilezles.org/articles/distfunctions2d/
 // Returns positive values if outside the triangle, negative values if inside the triangle
-float sdTriangle(const Point2D& p, const Point2D& p0, const Point2D& p1, const Point2D& p2)
+float sdTriangle(const Vec2& p, const Vec2& p0, const Vec2& p1, const Vec2& p2)
 {
-    Point2D e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
-    Point2D v0 = p - p0, v1 = p - p1, v2 = p - p2;
-    Point2D pq0 = v0 - e0 * Clamp(Dot(v0, e0) / Dot(e0, e0), 0.0f, 1.0f);
-    Point2D pq1 = v1 - e1 * Clamp(Dot(v1, e1) / Dot(e1, e1), 0.0f, 1.0f);
-    Point2D pq2 = v2 - e2 * Clamp(Dot(v2, e2) / Dot(e2, e2), 0.0f, 1.0f);
-    float s = Sign(e0.x * e2.y - e0.y * e2.x);
-    Point2D d =
+    Vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
+    Vec2 v0 = p - p0, v1 = p - p1, v2 = p - p2;
+    Vec2 pq0 = v0 - e0 * Clamp(Dot(v0, e0) / Dot(e0, e0), 0.0f, 1.0f);
+    Vec2 pq1 = v1 - e1 * Clamp(Dot(v1, e1) / Dot(e1, e1), 0.0f, 1.0f);
+    Vec2 pq2 = v2 - e2 * Clamp(Dot(v2, e2) / Dot(e2, e2), 0.0f, 1.0f);
+    float s = Sign(e0[0] * e2[1] - e0[1] * e2[0]);
+    Vec2 d =
         std::min(
             std::min(
-                Point2D{ Dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x) },
-                Point2D{ Dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x) }
+                Vec2{ Dot(pq0, pq0), s * (v0[0] * e0[1] - v0[1] * e0[0]) },
+                Vec2{ Dot(pq1, pq1), s * (v1[0] * e1[1] - v1[1] * e1[0]) }
             ),
-            Point2D{ Dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x) }
+            Vec2{ Dot(pq2, pq2), s * (v2[0] * e2[1] - v2[1] * e2[0]) }
         )
         ;
-    return -sqrt(d.x) * Sign(d.y);
+    return -sqrt(d[0]) * Sign(d[1]);
 }
 
-float SoftCoverage(const Point2D& P, const Point2D& A, const Point2D& B, const Point2D& C)
+float SoftCoverage(const Vec2& P, const Vec2& A, const Vec2& B, const Vec2& C)
 {
     // Equation 1
     float sdf = -sdTriangle(P, A, B, C);
@@ -118,16 +118,16 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
     memset(pixels, 0, width * height * 4);
 
     // transform the mesh into pixel coordinates
-    static std::vector<Point3D> screenPoints;
+    static std::vector<Vec3> screenPoints;
     screenPoints.resize(mesh.size());
     #if MULTI_THREADED()
     #pragma omp parallel for
     #endif
     for (int index = 0; index < mesh.size(); ++index)
     {
-        screenPoints[index].x = mesh[index].pos.x * float(width);
-        screenPoints[index].y = mesh[index].pos.y * float(height);
-        screenPoints[index].z = (c_farPlane - mesh[index].pos.z) / (c_farPlane - c_nearPlane);
+        screenPoints[index][0] = mesh[index].pos[0] * float(width);
+        screenPoints[index][1] = mesh[index].pos[1] * float(height);
+        screenPoints[index][2] = (c_farPlane - mesh[index].pos[2]) / (c_farPlane - c_nearPlane);
     }
 
     // rasterize
@@ -140,7 +140,7 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
         {
             float coverage = 0.0f;
             float depth = 0.0f;
-            Point3D color = { 0.0f, 0.0f, 0.0f };
+            Vec3 color = { 0.0f, 0.0f, 0.0f };
         };
         std::vector<PxInfo> pxInfo;
 
@@ -168,38 +168,38 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
                 const Vertex& vB = mesh[triangleIndex * 3 + 1];
                 const Vertex& vC = mesh[triangleIndex * 3 + 2];
 
-                const Point3D& sA = screenPoints[triangleIndex * 3 + 0];
-                const Point3D& sB = screenPoints[triangleIndex * 3 + 1];
-                const Point3D& sC = screenPoints[triangleIndex * 3 + 2];
+                const Vec3& sA = screenPoints[triangleIndex * 3 + 0];
+                const Vec3& sB = screenPoints[triangleIndex * 3 + 1];
+                const Vec3& sC = screenPoints[triangleIndex * 3 + 2];
 
-                Point2D resolution = Point2D{ float(width), float(height) };
+                const Vec2 resolution = Vec2{ float(width), float(height) };
 
-                Point2D sA2DNormed = (Point2D{ sA.x, sA.y } + 0.5f) / resolution;
-                Point2D sB2DNormed = (Point2D{ sB.x, sB.y } + 0.5f) / resolution;
-                Point2D sC2DNormed = (Point2D{ sC.x, sC.y } + 0.5f) / resolution;
-                Point2D pixelNormed = (Point2D{ float(ix), float(iy) } + 0.5f) / resolution;
+                Vec2 sA2DNormed = (Vec2{ sA[0], sA[1]} + 0.5f) / resolution;
+                Vec2 sB2DNormed = (Vec2{ sB[0], sB[1]} + 0.5f) / resolution;
+                Vec2 sC2DNormed = (Vec2{ sC[0], sC[1]} + 0.5f) / resolution;
+                Vec2 pixelNormed = (Vec2{ float(ix), float(iy) } + 0.5f) / resolution;
 
                 newPx.coverage = SoftCoverage(pixelNormed, sA2DNormed, sB2DNormed, sC2DNormed);
 
                 if (newPx.coverage < c_minimumCoverage)
                     continue;
 
-                Point3D uvw = CalculateBarycentricCoordinates(sA2DNormed, sB2DNormed, sC2DNormed, pixelNormed);
+                Vec3 uvw = CalculateBarycentricCoordinates(sA2DNormed, sB2DNormed, sC2DNormed, pixelNormed);
 
                 // The paper says they clamp uvw between 0 and 1 and then they renormalize it to sum to 1
                 uvw = Clamp(uvw, 0.0f, 1.0f);
-                float sum = uvw.x + uvw.y + uvw.z;
-                uvw.x /= sum;
-                uvw.y /= sum;
-                uvw.z /= sum;
+                float sum = uvw[0] + uvw[1] + uvw[2];
+                uvw[0] /= sum;
+                uvw[1] /= sum;
+                uvw[2] /= sum;
 
-                newPx.color = (vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z);
-                newPx.depth = (sA.z * uvw.x + sB.z * uvw.y + sC.z * uvw.z);
+                newPx.color = (vA.color * uvw[0] + vB.color * uvw[1] + vC.color * uvw[2]);
+                newPx.depth = (sA[2] * uvw[0] + sB[2] * uvw[1] + sC[2] * uvw[2]);
 
                 pxInfo.push_back(newPx);
             }
 
-            Point3D pixelColor = { 0.0f, 0.0f, 0.0f };
+            Vec3 pixelColor = { 0.0f, 0.0f, 0.0f };
             float totalWeight = 0.0f;
 
             // If this pixel is covered by any triangles
@@ -227,9 +227,9 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
             float backgroundWeight = 1.0f - totalWeight;
             pixelColor = pixelColor + c_backgroundColor * backgroundWeight;
 
-            pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(pixelColor.x * 255.0f, 0.0f, 255.0f);
-            pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(pixelColor.y * 255.0f, 0.0f, 255.0f);
-            pixels[pixelIndex * 4 + 2] = (unsigned char)Clamp(pixelColor.z * 255.0f, 0.0f, 255.0f);
+            pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(pixelColor[0] * 255.0f, 0.0f, 255.0f);
+            pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(pixelColor[1] * 255.0f, 0.0f, 255.0f);
+            pixels[pixelIndex * 4 + 2] = (unsigned char)Clamp(pixelColor[2] * 255.0f, 0.0f, 255.0f);
             pixels[pixelIndex * 4 + 3] = 255;
         }
     }
