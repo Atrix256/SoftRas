@@ -20,7 +20,9 @@
 static const int c_width = 800;
 static const int c_height = 600;
 
+static const float c_fovYDegrees = 45.0f;
 static const float c_nearPlane = 1.0f;
+static const float c_farPlane = 100.0f;
 static const bool c_leftHandedProjection = true;
 
 static const Vec3 c_backgroundColor = { 0.2f, 0.2f, 0.2f };
@@ -143,7 +145,10 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
 
         screenPoints[index][0] = pos[0];
         screenPoints[index][1] = pos[1];
-        screenPoints[index][2] = pos[2];
+
+        // It wants normalized linear depth.
+        //screenPoints[index][2] = pos[2];
+        screenPoints[index][2] = 1.0f - (mesh[index].pos[2] - c_nearPlane) / (c_farPlane - c_nearPlane);
     }
 
     // rasterize
@@ -255,22 +260,23 @@ int main(int argc, char** argv)
 {
     std::vector<Vertex> mesh =
     {
-        { {0.3f, 0.3f, 5.0f}, {0.0f, 1.0f, 1.0f} },
-        { {0.6f, 0.3f, 5.0f}, {0.0f, 1.0f, 1.0f} },
-        { {0.6f, 0.6f, 5.0f}, {0.0f, 1.0f, 1.0f} },
+        { {0.0f, 0.0f, 5.0f}, {0.0f, 0.0f, 1.0f} },
+        { {0.5f, 0.0f, 5.0f}, {0.0f, 0.0f, 1.0f} },
+        { {0.5f, 0.5f, 5.0f}, {0.0f, 0.0f, 1.0f} },
 
-        { {0.3f, 0.3f, 10.0f}, {0.0f, 1.0f, 0.0f} },
-        { {0.6f, 0.3f, 10.0f}, {0.0f, 1.0f, 0.0f} },
-        { {0.6f, 0.6f, 10.0f}, {0.0f, 1.0f, 0.0f} },
+        { {0.1f, 0.0f, 5.1f}, {0.0f, 1.0f, 0.0f} },
+        { {0.6f, 0.0f, 5.1f}, {0.0f, 1.0f, 0.0f} },
+        { {0.6f, 0.5f, 5.1f}, {0.0f, 1.0f, 0.0f} },
 
-        { {0.2f, 0.2f, 11.0f}, {1.0f, 0.0f, 0.0f} },
-        { {0.5f, 0.2f, 11.0f}, {1.0f, 0.0f, 0.0f} },
-        { {0.5f, 0.6f, 11.0f}, {1.0f, 0.0f, 0.0f} },
+        { {0.2f, 0.0f, 5.2f}, {1.0f, 0.0f, 0.0f} },
+        { {0.7f, 0.0f, 5.2f}, {1.0f, 0.0f, 0.0f} },
+        { {0.7f, 0.5f, 5.2f}, {1.0f, 0.0f, 0.0f} },
     };
 
-    /*
+    #if 0
+
     FILE* file = nullptr;
-    fopen_s(&file, "Assets/sphere/sphere_642.bin", "rb");
+    fopen_s(&file, "Assets/spot/spot_triangulated.bin", "rb");
     if (file)
     {
         fseek(file, 0, SEEK_END);
@@ -281,9 +287,14 @@ int main(int argc, char** argv)
         fread(mesh.data(), sizeof(Vertex), vertexCount, file);
         fclose(file);
     }
-    */
 
-    Mat4x4 viewProjMtx = PerspectiveFovLH_ReverseZ_InfiniteDepth(45.0f, float(c_width) / float(c_height), c_nearPlane, c_leftHandedProjection);
+    // TODO: temp! later, move the camera back
+    for (Vertex& v : mesh)
+        v.pos[2] += 5.0f;
+
+    #endif
+
+    Mat4x4 viewProjMtx = PerspectiveFovLH_ReverseZ_InfiniteDepth(c_fovYDegrees, float(c_width) / float(c_height), c_nearPlane, c_leftHandedProjection);
 
     unsigned char* pixels = Thirteen::Init(c_width, c_height);
     if (!pixels)
@@ -301,8 +312,6 @@ int main(int argc, char** argv)
     return 0;
 }
 /*
-- viewProjMtx
-- load mesh from file (sphere?)
 - why not semi transparent? review paper?
 - then gradients
 - camera controls
@@ -314,6 +323,7 @@ TODO:
 - soft ras.
 - link to paper and the blog post that talks about more advanced stuff
 ? should you do the Silhouette aggregate function? "It's used with a separate silhouette loss for unsupervised reconstruction, where you only have a binary mask as ground truth (no color/shading info)"
+? perspective correct interpolation of color and depth?
 
 Notes:
 The core idea is that rasterization has a binary hard edge over space, and occlusion via the depth buffer is a binary hard edge over depth.
@@ -325,6 +335,7 @@ https://openaccess.thecvf.com/content_ICCV_2019/papers/Liu_Soft_Rasterizer_A_Dif
 Link to this for slightly newer methods of differentiable rasterization:
 https://jjbannister.github.io/tinydiffrast/
 
-* softmax wants closer triangles to have a larger value, so i used a reversed z infinite depth projection.
+* paper wants a distance from pixel to closest edge. SDF is exactly that, so i used iq's function (link)
+* softmax wants closer triangles to have a larger value, so i used a reversed z infinite depth projection. (did you abandon this? yeah. it wants normalized reverse linear depth)
 
 */
