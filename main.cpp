@@ -24,18 +24,11 @@ static const float c_epsilon = 1e-4f; // TODO: this is not specified in the pape
 static const float c_gamma = 1e-4f;
 
 static const float c_nearPlane = 0.1f;
-static const float c_farPlane = 100.0f;
+static const float c_farPlane = 20.0f;
 
 static const float c_minimumCoverage = 1e-6f;
 
 static const Point3D c_backgroundColor = { 0.2f, 0.2f, 0.2f };
-
-struct GBuffer
-{
-    float coverage = 0.0f;
-    float depth = 0.0f;
-    Point3D color = { 0.0f, 0.0f, 0.0f };
-};
 
 struct Vertex
 {
@@ -46,13 +39,13 @@ struct Vertex
 // In UV space
 Vertex g_mesh[] =
 {
-    { {0.3f, 0.3f, 10.0f}, {1.0f, 0.0f, 0.0f} },
+    { {0.3f, 0.3f, 10.0f}, {0.0f, 1.0f, 0.0f} },
     { {0.6f, 0.3f, 10.0f}, {0.0f, 1.0f, 0.0f} },
-    { {0.6f, 0.6f, 10.0f}, {0.0f, 0.0f, 1.0f} },
+    { {0.6f, 0.6f, 10.0f}, {0.0f, 1.0f, 0.0f} },
 
-    { {0.1f, 0.1f, 20.0f}, {1.0f, 0.0f, 0.0f} },
-    { {0.2f, 0.1f, 20.0f}, {0.0f, 1.0f, 0.0f} },
-    { {0.2f, 0.2f, 20.0f}, {0.0f, 0.0f, 1.0f} },
+    { {0.2f, 0.2f, 11.0f}, {1.0f, 0.0f, 0.0f} },
+    { {0.5f, 0.2f, 11.0f}, {1.0f, 0.0f, 0.0f} },
+    { {0.5f, 0.6f, 11.0f}, {1.0f, 0.0f, 0.0f} },
 };
 
 float CrossProduct2D(float x1, float y1, float x2, float y2)
@@ -123,7 +116,7 @@ float SoftCoverage(const Point2D& P, const Point2D& A, const Point2D& B, const P
     return Sigmoid(Sign(sdf) * sdf * sdf / c_sigma);
 }
 
-void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigned int width, unsigned int height)
+void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int height)
 {
     // Clear to black
     memset(pixels, 0, width * height * 4);
@@ -147,14 +140,20 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
     #endif
     for (int iy = 0; iy < (int)height; ++iy)
     {
+        struct PxInfo
+        {
+            float coverage = 0.0f;
+            float depth = 0.0f;
+            Point3D color = { 0.0f, 0.0f, 0.0f };
+        };
+        std::vector<PxInfo> pxInfo;
+
         for (int ix = 0; ix < (int)width; ++ix)
         {
+            pxInfo.clear();
             int pixelIndex = iy * width + ix;
 
-            std::vector<GBuffer>& gb = gBuffer[pixelIndex];
-            gb.resize(0);
-
-            // TODO: temp. Or maybe leave this! it makes a breakpoint on the pixel that you click
+            // If you want to debug a specific pixel, turn off MULTI_THREADED(), put a breakpoint in here, and click the pixel you want to debug.
             if (Thirteen::GetMouseButton(0) && !Thirteen::GetMouseButtonLastFrame(0))
             {
                 int mouseX, mouseY;
@@ -165,11 +164,9 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
                 }
             }
 
-            // TODO: may not need to store all gbuffer entries, but just calculate gradients right here per pixel and store those, with the final color.
-
             for (int triangleIndex = 0; triangleIndex < _countof(g_mesh) / 3; ++triangleIndex)
             {
-                GBuffer newGB;
+                PxInfo newPx;
 
                 const Vertex& vA = g_mesh[triangleIndex * 3 + 0];
                 const Vertex& vB = g_mesh[triangleIndex * 3 + 1];
@@ -186,9 +183,9 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
                 Point2D sC2DNormed = (Point2D{ sC.x, sC.y } + 0.5f) / resolution;
 				Point2D pixelNormed = (Point2D{ float(ix), float(iy) } + 0.5f) / resolution;
 
-                newGB.coverage = SoftCoverage(pixelNormed, sA2DNormed, sB2DNormed, sC2DNormed);
+                newPx.coverage = SoftCoverage(pixelNormed, sA2DNormed, sB2DNormed, sC2DNormed);
 
-                if (newGB.coverage < c_minimumCoverage)
+                if (newPx.coverage < c_minimumCoverage)
                     continue;
 
                 Point3D uvw = CalculateBarycentricCoordinates(sA2DNormed, sB2DNormed, sC2DNormed, pixelNormed);
@@ -200,30 +197,30 @@ void RasterizeMesh(unsigned char* pixels, std::vector<GBuffer>* gBuffer, unsigne
                 uvw.y /= sum;
                 uvw.z /= sum;
 
-                newGB.color = (vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z);
-                newGB.depth = (sA.z * uvw.x + sB.z * uvw.y + sC.z * uvw.z);
+                newPx.color = (vA.color * uvw.x + vB.color * uvw.y + vC.color * uvw.z);
+                newPx.depth = (sA.z * uvw.x + sB.z * uvw.y + sC.z * uvw.z);
 
-                gb.push_back(newGB);
+                pxInfo.push_back(newPx);
             }
 
             Point3D pixelColor = { 0.0f, 0.0f, 0.0f };
             float totalWeight = 0.0f;
 
             // If this pixel is covered by any triangles
-            if (gb.size() > 0)
+            if (pxInfo.size() > 0)
             {
                 // Track the max exponent across all triangles
                 float softmax_max = c_epsilon / c_gamma;  // from background term
-                for (const GBuffer& entry : gb)
+                for (const PxInfo& entry : pxInfo)
                     softmax_max = std::max(softmax_max, entry.depth / c_gamma);
 
                 // Compute denominator with max subtracted (numerically stable)
                 float weightDenom = std::exp(c_epsilon / c_gamma - softmax_max);
-                for (const GBuffer& entry : gb)
+                for (const PxInfo& entry : pxInfo)
                     weightDenom += entry.coverage * std::exp(entry.depth / c_gamma - softmax_max);
 
                 // Weights — the softmax_max cancels in numerator/denominator
-                for (const GBuffer& entry : gb)
+                for (const PxInfo& entry : pxInfo)
                 {
                     float weight = entry.coverage * std::exp(entry.depth / c_gamma - softmax_max) / weightDenom;
                     pixelColor = pixelColor + entry.color * weight;
@@ -248,11 +245,9 @@ int main(int argc, char** argv)
     if (!pixels)
         return 1;
 
-    std::vector<std::vector<GBuffer>> gBuffer(Thirteen::GetWidth() * Thirteen::GetHeight());
-
     while (Thirteen::Render() && !Thirteen::GetKey(VK_ESCAPE))
     {
-        RasterizeMesh(pixels, gBuffer.data(), Thirteen::GetWidth(), Thirteen::GetHeight());
+        RasterizeMesh(pixels, Thirteen::GetWidth(), Thirteen::GetHeight());
 
         if (Thirteen::GetKey('V') && !Thirteen::GetKeyLastFrame('V'))
             Thirteen::SetVSync(!Thirteen::GetVSync());
@@ -262,11 +257,15 @@ int main(int argc, char** argv)
     return 0;
 }
 /*
+Gradients next?
+
+
 TODO:
 - 2d first then 3d
 - make optimization work for... vertex positions, material param (color?), lights, camera
 - soft ras.
 - link to paper and the blog post that talks about more advanced stuff
+? should you do the Silhouette aggregate function? "It's used with a separate silhouette loss for unsupervised reconstruction, where you only have a binary mask as ground truth (no color/shading info)"
 
 Notes:
 The core idea is that rasterization has a binary hard edge over space, and occlusion via the depth buffer is a binary hard edge over depth.
