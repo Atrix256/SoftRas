@@ -66,6 +66,13 @@ Vec2 XY(const Vec<N>& A)
     return Vec2{ A[0], A[1] };
 }
 
+template <size_t N>
+Vec3 XYZ(const Vec<N>& A)
+{
+    static_assert(N >= 3, "Vec must have at least 3 components");
+    return Vec3{ A[0], A[1], A[2] };
+}
+
 // ======================================= Vec / Vec
 
 template <size_t N>
@@ -75,6 +82,18 @@ float Dot(const Vec<N>& A, const Vec<N>& B)
     for (size_t i = 0; i < N; ++i)
         result += A[i] * B[i];
     return result;
+}
+
+template <size_t N>
+float LenSquared(const Vec<N>& A)
+{
+    return Dot(A, A);
+}
+
+template <size_t N>
+float Len(const Vec<N>& A)
+{
+    return std::sqrt(LenSquared(A));
 }
 
 template <size_t N>
@@ -111,6 +130,38 @@ Vec<N> operator/ (const Vec<N>& A, const Vec<N>& B)
     for (size_t i = 0; i < N; ++i)
         ret[i] = A[i] / B[i];
     return ret;
+}
+
+template <size_t N>
+Vec<N>& operator+= (Vec<N>& A, const Vec<N>& B)
+{
+    for (size_t i = 0; i < N; ++i)
+        A[i] += B[i];
+    return A;
+}
+
+template <size_t N>
+Vec<N>& operator-= (Vec<N>& A, const Vec<N>& B)
+{
+    for (size_t i = 0; i < N; ++i)
+        A[i] -= B[i];
+    return A;
+}
+
+template <size_t N>
+Vec<N>& operator*= (Vec<N>& A, const Vec<N>& B)
+{
+    for (size_t i = 0; i < N; ++i)
+        A[i] *= B[i];
+    return A;
+}
+
+template <size_t N>
+Vec<N>& operator/= (Vec<N>& A, const Vec<N>& B)
+{
+    for (size_t i = 0; i < N; ++i)
+        A[i] /= B[i];
+    return A;
 }
 
 namespace std
@@ -161,6 +212,74 @@ Vec<N> operator/ (const Vec<N>& A, float B)
     for (size_t i = 0; i < N; ++i)
         ret[i] = A[i] / B;
     return ret;
+}
+
+template <size_t N>
+Vec<N> operator+ (float A, const Vec<N>& B)
+{
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A + B[i];
+    return ret;
+}
+
+template <size_t N>
+Vec<N> operator- (float A, const Vec<N>& B)
+{
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A - B[i];
+    return ret;
+}
+
+template <size_t N>
+Vec<N> operator* (float A, const Vec<N>& B)
+{
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A * B[i];
+    return ret;
+}
+
+template <size_t N>
+Vec<N> operator/ (float A, const Vec<N>& B)
+{
+    Vec<N> ret;
+    for (size_t i = 0; i < N; ++i)
+        ret[i] = A / B[i];
+    return ret;
+}
+
+template <size_t N>
+Vec<N>& operator+= (Vec<N>& A, float B)
+{
+    for (size_t i = 0; i < N; ++i)
+        A[i] += B;
+    return A;
+}
+
+template <size_t N>
+Vec<N>& operator-= (Vec<N>& A, float B)
+{
+    for (size_t i = 0; i < N; ++i)
+        A[i] -= B;
+    return A;
+}
+
+template <size_t N>
+Vec<N>& operator*= (Vec<N>& A, float B)
+{
+    for (size_t i = 0; i < N; ++i)
+        A[i] *= B;
+    return A;
+}
+
+template <size_t N>
+Vec<N>& operator/= (Vec<N>& A, float B)
+{
+    for (size_t i = 0; i < N; ++i)
+        A[i] /= B;
+    return A;
 }
 
 // ======================================= Vec / Matrix

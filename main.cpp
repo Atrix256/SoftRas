@@ -51,71 +51,95 @@ struct Vertex
     int shapeID;
 };
 
-float CrossProduct2D(float x1, float y1, float x2, float y2)
+// Returns positive values if outside the triangle, negative values if inside the triangle.
+// Also returns derivatives and barycentric coordinates.
+float sdTriangle(const Vec2& p, const Vec2& A, const Vec2& B, const Vec2& C, Vec2& dDist_dA, Vec2& dDist_dB, Vec2& dDist_dC, Vec3& uvw)
 {
-    return x1 * y2 - x2 * y1;
-}
+    Vec2 edgeAB = B - A;
+    Vec2 edgeBC = C - B;
+    Vec2 edgeCA = A - C;
 
-Vec3 CalculateBarycentricCoordinates(Vec2 A, Vec2 B, Vec2 C, Vec2 P)
-{
-    Vec3 ret;
-    float& u = ret[0];
-    float& v = ret[1];
-    float& w = ret[2];
+    float tAB = Clamp(Dot(p - A, edgeAB) / Dot(edgeAB, edgeAB), 0.0f, 1.0f);
+    float tBC = Clamp(Dot(p - B, edgeBC) / Dot(edgeBC, edgeBC), 0.0f, 1.0f);
+    float tCA = Clamp(Dot(p - C, edgeCA) / Dot(edgeCA, edgeCA), 0.0f, 1.0f);
 
-    // Vectors for the full triangle
-    float ax = B[0] - A[0];
-    float ay = B[1] - A[1];
-    float bx = C[0] - A[0];
-    float by = C[1] - A[1];
+    Vec2 closestAB = A + edgeAB * tAB;
+    Vec2 closestBC = B + edgeBC * tBC;
+    Vec2 closestCA = C + edgeCA * tCA;
 
-    // Vectors for the point P relative to A
-    float px = P[0] - A[0];
-    float py = P[1] - A[1];
+    float distSQAB = LenSquared(p - closestAB);
+    float distSQBC = LenSquared(p - closestBC);
+    float distSQCA = LenSquared(p - closestCA);
 
-    float totalArea = CrossProduct2D(ax, ay, bx, by);
+    // Calculate barycentric coordinates
+    float signedAreaAB = Signed2DTriArea(p, A, B);
+    float signedAreaBC = Signed2DTriArea(p, B, C);
+    float signedAreaCA = Signed2DTriArea(p, C, A);
+    float totalArea = Signed2DTriArea(A, B, C);
+    uvw[0] = signedAreaBC / totalArea;
+    uvw[1] = signedAreaCA / totalArea;
+    uvw[2] = signedAreaAB / totalArea;
 
-    // Check for a degenerate triangle
-    if (std::abs(totalArea) < 1e-9) {
-        u = v = w = 0.0f;
-        return ret;
+    // See if the point is inside the triangle or not
+    bool inside = std::abs(Sign(signedAreaAB) + Sign(signedAreaBC) + Sign(signedAreaCA)) == 3.0f;
+    float sign = inside ? -1.0f : 1.0f;
+
+    // If AB is the closest edge
+    if (distSQAB < distSQBC && distSQAB < distSQCA)
+    {
+        float dist = std::sqrt(distSQAB) * sign;
+
+        dDist_dA = (1.0f - tAB) * (closestAB - p) / dist;
+        dDist_dB = tAB * (closestAB - p) / dist;
+        dDist_dC = Vec2{ 0.0f, 0.0f };
+
+        return dist;
     }
+    // Else if BC is the closest edge
+    else if (distSQBC < distSQCA)
+    {
+        float dist = std::sqrt(distSQBC) * sign;
 
-    // Calculate the coordinates
-    v = CrossProduct2D(px, py, bx, by) / totalArea; // Weight for B
-    w = CrossProduct2D(ax, ay, px, py) / totalArea; // Weight for C
-    u = 1.0f - v - w;                               // Weight for A
+        dDist_dA = Vec2{ 0.0f, 0.0f };
+        dDist_dB = (1.0f - tBC) * (closestBC - p) / dist;
+        dDist_dC = tBC * (closestBC - p) / dist;
 
-    return ret;
+        return dist;
+    }
+    // Else CA is the closest edge
+    else
+    {
+        float dist = std::sqrt(distSQCA) * sign;
+
+        dDist_dA = tCA * (closestCA - p) / dist;
+        dDist_dB = Vec2{ 0.0f, 0.0f };
+        dDist_dC = (1.0f - tCA) * (closestCA - p) / dist;
+
+        return dist;
+    }
 }
 
-// Triangle SDF from https://iquilezles.org/articles/distfunctions2d/
-// Returns positive values if outside the triangle, negative values if inside the triangle
-float sdTriangle(const Vec2& p, const Vec2& p0, const Vec2& p1, const Vec2& p2)
+float SoftCoverage(const Vec2& P, const Vec2& A, const Vec2& B, const Vec2& C, Vec2& dCoverage_dA, Vec2& dCoverage_dB, Vec2& dCoverage_dC, Vec3& uvw)
 {
-    Vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
-    Vec2 v0 = p - p0, v1 = p - p1, v2 = p - p2;
-    Vec2 pq0 = v0 - e0 * Clamp(Dot(v0, e0) / Dot(e0, e0), 0.0f, 1.0f);
-    Vec2 pq1 = v1 - e1 * Clamp(Dot(v1, e1) / Dot(e1, e1), 0.0f, 1.0f);
-    Vec2 pq2 = v2 - e2 * Clamp(Dot(v2, e2) / Dot(e2, e2), 0.0f, 1.0f);
-    float s = Sign(e0[0] * e2[1] - e0[1] * e2[0]);
-    Vec2 d =
-        std::min(
-            std::min(
-                Vec2{ Dot(pq0, pq0), s * (v0[0] * e0[1] - v0[1] * e0[0]) },
-                Vec2{ Dot(pq1, pq1), s * (v1[0] * e1[1] - v1[1] * e1[0]) }
-            ),
-            Vec2{ Dot(pq2, pq2), s * (v2[0] * e2[1] - v2[1] * e2[0]) }
-        )
-        ;
-    return -sqrt(d[0]) * Sign(d[1]);
-}
+    // sdgTriangle returns positive for outside, and negative inside.
+    // The paper wants the opposite of that, so we negate the results.
+    Vec2 dDist_dA, dDist_dB, dDist_dC;  
+    float sdf = sdTriangle(P, A, B, C, dDist_dA, dDist_dB, dDist_dC, uvw);
+    sdf *= -1.0f;
+    dDist_dA *= -1.0f;
+    dDist_dB *= -1.0f;
+    dDist_dC *= -1.0f;
 
-float SoftCoverage(const Vec2& P, const Vec2& A, const Vec2& B, const Vec2& C)
-{
-    // Equation 1
-    float sdf = -sdTriangle(P, A, B, C);
-    return Sigmoid(Sign(sdf) * sdf * sdf / c_sigma);
+    // Calculate the coverage
+    float coverage = Sigmoid(Sign(sdf) * sdf * sdf / c_sigma);
+
+    // Calculate the derivatives
+    float dCoverage_dDist = coverage * (1.0f - coverage) * 2.0f * std::abs(sdf) / c_sigma;
+    dCoverage_dA = dCoverage_dDist * dDist_dA;
+    dCoverage_dB = dCoverage_dDist * dDist_dB;
+    dCoverage_dC = dCoverage_dDist * dDist_dC;
+
+    return coverage;
 }
 
 Vec2 PixelToClip(int ix, int iy)
@@ -146,7 +170,7 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
         screenPoints[index][0] = pos[0];
         screenPoints[index][1] = pos[1];
 
-        // It wants normalized linear depth.
+        // It wants normalized negative linear depth. 1 at the near plane, 0 at the far plane.
         //screenPoints[index][2] = pos[2];
         screenPoints[index][2] = 1.0f - (mesh[index].pos[2] - c_nearPlane) / (c_farPlane - c_nearPlane);
     }
@@ -200,12 +224,12 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
 
                 Vec2 pxClip = PixelToClip(ix, iy);
 
-                newPx.coverage = SoftCoverage(XY(pxClip), XY(sA), XY(sB), XY(sC));
+                Vec2 dCoverage_dA, dCoverage_dB, dCoverage_dC;
+                Vec3 uvw;
+                newPx.coverage = SoftCoverage(XY(pxClip), XY(sA), XY(sB), XY(sC), dCoverage_dA, dCoverage_dB, dCoverage_dC, uvw);
 
                 if (newPx.coverage < c_minimumCoverage)
                     continue;
-
-                Vec3 uvw = CalculateBarycentricCoordinates(XY(sA), XY(sB), XY(sC), XY(pxClip));
 
                 // The paper says they clamp uvw between 0 and 1 and then they renormalize it to sum to 1
                 uvw = Clamp(uvw, 0.0f, 1.0f);
@@ -236,7 +260,7 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
                 for (const PxInfo& entry : pxInfo)
                     weightDenom += entry.coverage * std::exp(entry.depth / c_gamma - softmax_max);
 
-                // Weights — the softmax_max cancels in numerator/denominator
+                // Weights - the softmax_max cancels in numerator/denominator
                 for (const PxInfo& entry : pxInfo)
                 {
                     float weight = entry.coverage * std::exp(entry.depth / c_gamma - softmax_max) / weightDenom;
