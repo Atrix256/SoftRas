@@ -17,16 +17,16 @@
 
 #define MULTI_THREADED() 0 // TODO: turn to true when working
 
-static const float c_sigma = 1e-4f;
+static const float c_sigma = 1e-5f;
 
 // Constants from equation 3
-static const float c_epsilon = 1e-4f; // TODO: this is not specified in the paper
+static const float c_epsilon = 1e-3f;
 static const float c_gamma = 1e-4f;
 
-static const float c_nearPlane = 0.1f;
-static const float c_farPlane = 20.0f;
+static const float c_nearPlane = 1.0f;
+static const float c_farPlane = 100.0f;
 
-static const float c_minimumCoverage = 1e-6f;
+static const float c_minimumCoverage = 1e-4f;
 
 static const Point3D c_backgroundColor = { 0.2f, 0.2f, 0.2f };
 
@@ -34,18 +34,14 @@ struct Vertex
 {
     Point3D pos;
     Point3D color;
-};
-
-// In UV space
-Vertex g_mesh[] =
-{
-    { {0.3f, 0.3f, 10.0f}, {0.0f, 1.0f, 0.0f} },
-    { {0.6f, 0.3f, 10.0f}, {0.0f, 1.0f, 0.0f} },
-    { {0.6f, 0.6f, 10.0f}, {0.0f, 1.0f, 0.0f} },
-
-    { {0.2f, 0.2f, 11.0f}, {1.0f, 0.0f, 0.0f} },
-    { {0.5f, 0.2f, 11.0f}, {1.0f, 0.0f, 0.0f} },
-    { {0.5f, 0.6f, 11.0f}, {1.0f, 0.0f, 0.0f} },
+    Point3D normal;
+    Point4D tangent;
+    Point2D UV0;
+    Point2D UV1;
+    Point2D UV2;
+    Point2D UV3;
+    int materialID;
+    int shapeID;
 };
 
 float CrossProduct2D(float x1, float y1, float x2, float y2)
@@ -105,7 +101,7 @@ float sdTriangle(const Point2D& p, const Point2D& p0, const Point2D& p1, const P
             ),
             Point2D{ Dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x) }
         )
-    ;
+        ;
     return -sqrt(d.x) * Sign(d.y);
 }
 
@@ -116,22 +112,22 @@ float SoftCoverage(const Point2D& P, const Point2D& A, const Point2D& B, const P
     return Sigmoid(Sign(sdf) * sdf * sdf / c_sigma);
 }
 
-void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int height)
+void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int height, const std::vector<Vertex>& mesh, const float viewProjMtx[16])
 {
     // Clear to black
     memset(pixels, 0, width * height * 4);
 
     // transform the mesh into pixel coordinates
     static std::vector<Point3D> screenPoints;
-    screenPoints.resize(_countof(g_mesh));
+    screenPoints.resize(mesh.size());
     #if MULTI_THREADED()
     #pragma omp parallel for
     #endif
-    for (int index = 0; index < _countof(g_mesh); ++index)
+    for (int index = 0; index < mesh.size(); ++index)
     {
-        screenPoints[index].x = g_mesh[index].pos.x * float(width);
-        screenPoints[index].y = g_mesh[index].pos.y * float(height);
-        screenPoints[index].z = (c_farPlane - g_mesh[index].pos.z) / (c_farPlane - c_nearPlane);
+        screenPoints[index].x = mesh[index].pos.x * float(width);
+        screenPoints[index].y = mesh[index].pos.y * float(height);
+        screenPoints[index].z = (c_farPlane - mesh[index].pos.z) / (c_farPlane - c_nearPlane);
     }
 
     // rasterize
@@ -164,13 +160,13 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
                 }
             }
 
-            for (int triangleIndex = 0; triangleIndex < _countof(g_mesh) / 3; ++triangleIndex)
+            for (int triangleIndex = 0; triangleIndex < mesh.size() / 3; ++triangleIndex)
             {
                 PxInfo newPx;
 
-                const Vertex& vA = g_mesh[triangleIndex * 3 + 0];
-                const Vertex& vB = g_mesh[triangleIndex * 3 + 1];
-                const Vertex& vC = g_mesh[triangleIndex * 3 + 2];
+                const Vertex& vA = mesh[triangleIndex * 3 + 0];
+                const Vertex& vB = mesh[triangleIndex * 3 + 1];
+                const Vertex& vC = mesh[triangleIndex * 3 + 2];
 
                 const Point3D& sA = screenPoints[triangleIndex * 3 + 0];
                 const Point3D& sB = screenPoints[triangleIndex * 3 + 1];
@@ -181,7 +177,7 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
                 Point2D sA2DNormed = (Point2D{ sA.x, sA.y } + 0.5f) / resolution;
                 Point2D sB2DNormed = (Point2D{ sB.x, sB.y } + 0.5f) / resolution;
                 Point2D sC2DNormed = (Point2D{ sC.x, sC.y } + 0.5f) / resolution;
-				Point2D pixelNormed = (Point2D{ float(ix), float(iy) } + 0.5f) / resolution;
+                Point2D pixelNormed = (Point2D{ float(ix), float(iy) } + 0.5f) / resolution;
 
                 newPx.coverage = SoftCoverage(pixelNormed, sA2DNormed, sB2DNormed, sC2DNormed);
 
@@ -241,13 +237,32 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
 
 int main(int argc, char** argv)
 {
+    std::vector<Vertex> mesh =
+    {
+        { {0.3f, 0.3f, 10.0f}, {0.0f, 1.0f, 0.0f} },
+        { {0.6f, 0.3f, 10.0f}, {0.0f, 1.0f, 0.0f} },
+        { {0.6f, 0.6f, 10.0f}, {0.0f, 1.0f, 0.0f} },
+
+        { {0.2f, 0.2f, 11.0f}, {1.0f, 0.0f, 0.0f} },
+        { {0.5f, 0.2f, 11.0f}, {1.0f, 0.0f, 0.0f} },
+        { {0.5f, 0.6f, 11.0f}, {1.0f, 0.0f, 0.0f} },
+    };
+
+    static const float viewProjMtx[16] =
+    {
+        -1.810658f, 0.000000f,  0.002884f, -0.014419f,
+         0.000000f, 2.414213f,  0.000000f,  0.000000f,
+         0.000000f, 0.000000f,  0.000100f,  0.003500f,
+        -0.001593f, 0.000000f, -0.999999f,  4.999994f
+    };
+
     unsigned char* pixels = Thirteen::Init(800, 600);
     if (!pixels)
         return 1;
 
     while (Thirteen::Render() && !Thirteen::GetKey(VK_ESCAPE))
     {
-        RasterizeMesh(pixels, Thirteen::GetWidth(), Thirteen::GetHeight());
+        RasterizeMesh(pixels, Thirteen::GetWidth(), Thirteen::GetHeight(), mesh, viewProjMtx);
 
         if (Thirteen::GetKey('V') && !Thirteen::GetKeyLastFrame('V'))
             Thirteen::SetVSync(!Thirteen::GetVSync());
@@ -257,7 +272,10 @@ int main(int argc, char** argv)
     return 0;
 }
 /*
-Gradients next?
+- viewProjMtx
+- why not semi transparent? review paper?
+- then gradients
+
 
 
 TODO:
