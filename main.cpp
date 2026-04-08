@@ -156,7 +156,7 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
     memset(pixels, 0, width * height * 4);
 
     // transform the mesh into pixel coordinates
-    static std::vector<Vec3> screenPoints;
+    static std::vector<Vec4> screenPoints;
     screenPoints.resize(mesh.size());
     #if MULTI_THREADED()
     #pragma omp parallel for
@@ -165,14 +165,15 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
     {
         Vec4 src = Vec4{ mesh[index].pos[0], mesh[index].pos[1], mesh[index].pos[2], 1.0f };
         Vec4 pos = MatMul(src, viewProjMtx);
-        pos = pos / pos[3]; // perspective divide
 
-        screenPoints[index][0] = pos[0];
-        screenPoints[index][1] = pos[1];
+        screenPoints[index][0] = pos[0] / pos[3];
+        screenPoints[index][1] = pos[1] / pos[3];
 
         // It wants normalized negative linear depth. 1 at the near plane, 0 at the far plane.
         //screenPoints[index][2] = pos[2];
         screenPoints[index][2] = 1.0f - (mesh[index].pos[2] - c_nearPlane) / (c_farPlane - c_nearPlane);
+
+        screenPoints[index][3] = 1.0f / pos[3];
     }
 
     // rasterize
@@ -186,6 +187,7 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
             float coverage = 0.0f;
             float depth = 0.0f;
             Vec3 color = { 0.0f, 0.0f, 0.0f };
+            Vec2 uv0 = { 0.0f, 0.0f };
         };
         std::vector<PxInfo> pxInfo;
 
@@ -216,9 +218,9 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
                 const Vertex& vB = mesh[triangleIndex * 3 + 1];
                 const Vertex& vC = mesh[triangleIndex * 3 + 2];
 
-                const Vec3& sA = screenPoints[triangleIndex * 3 + 0];
-                const Vec3& sB = screenPoints[triangleIndex * 3 + 1];
-                const Vec3& sC = screenPoints[triangleIndex * 3 + 2];
+                const Vec4& sA = screenPoints[triangleIndex * 3 + 0];
+                const Vec4& sB = screenPoints[triangleIndex * 3 + 1];
+                const Vec4& sC = screenPoints[triangleIndex * 3 + 2];
 
                 const Vec2 resolution = Vec2{ float(width), float(height) };
 
@@ -238,8 +240,13 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
                 uvw[1] /= sum;
                 uvw[2] /= sum;
 
-                newPx.color = (vA.color * uvw[0] + vB.color * uvw[1] + vC.color * uvw[2]);
+                // Screen space barycentric interpolation.
                 newPx.depth = (sA[2] * uvw[0] + sB[2] * uvw[1] + sC[2] * uvw[2]);
+
+                // Perspective correct barycentric interpolation.
+                float ooW = (sA[3] * uvw[0] + sB[3] * uvw[1] + sC[3] * uvw[2]);
+                newPx.color = (vA.color * uvw[0] * sA[3] + vB.color * uvw[1] * sB[3] + vC.color * uvw[2] * sC[3]) / ooW;
+                newPx.uv0 = (vA.UV0 * uvw[0] * sA[3] + vB.UV0 * uvw[1] * sB[3] + vC.UV0 * uvw[2] * sC[3]) / ooW;
 
                 pxInfo.push_back(newPx);
             }
@@ -264,13 +271,16 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
                 for (const PxInfo& entry : pxInfo)
                 {
                     float weight = entry.coverage * std::exp(entry.depth / c_gamma - softmax_max) / weightDenom;
-                    pixelColor = pixelColor + entry.color * weight;
+                    pixelColor = pixelColor + Vec3{entry.uv0[0], entry.uv0[1], 0.0f} * weight;
                     totalWeight += weight;
                 }
             }
 
             float backgroundWeight = 1.0f - totalWeight;
             pixelColor = pixelColor + c_backgroundColor * backgroundWeight;
+
+            // Convert linear to sRGB
+            pixelColor = LinearToSRGB(pixelColor);
 
             pixels[pixelIndex * 4 + 0] = (unsigned char)Clamp(pixelColor[0] * 255.0f, 0.0f, 255.0f);
             pixels[pixelIndex * 4 + 1] = (unsigned char)Clamp(pixelColor[1] * 255.0f, 0.0f, 255.0f);
@@ -336,8 +346,7 @@ int main(int argc, char** argv)
     return 0;
 }
 /*
-- why not semi transparent? review paper?
-- then gradients
+- gradients
 - camera controls
 
 
@@ -347,7 +356,7 @@ TODO:
 - soft ras.
 - link to paper and the blog post that talks about more advanced stuff
 ? should you do the Silhouette aggregate function? "It's used with a separate silhouette loss for unsupervised reconstruction, where you only have a binary mask as ground truth (no color/shading info)"
-? perspective correct interpolation of color and depth?
+! will need to deal with sRGB correctness too before the end.
 
 Notes:
 The core idea is that rasterization has a binary hard edge over space, and occlusion via the depth buffer is a binary hard edge over depth.

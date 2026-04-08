@@ -174,6 +174,24 @@ namespace std
             ret[i] = std::min(A[i], B[i]);
         return ret;
     }
+
+    template <size_t N>
+    Vec<N> abs(const Vec<N>& A)
+    {
+        Vec<N> ret;
+        for (size_t i = 0; i < N; ++i)
+            ret[i] = std::abs(A[i]);
+        return ret;
+    }
+
+    template <size_t N>
+    Vec<N> pow(const Vec<N>& A, const Vec<N>& B)
+    {
+        Vec<N> ret;
+        for (size_t i = 0; i < N; ++i)
+            ret[i] = std::pow(A[i], B[i]);
+        return ret;
+    }
 };
 
 // ======================================= Vec / Scalar
@@ -330,4 +348,27 @@ inline Mat4x4 PerspectiveFovLH_ReverseZ_InfiniteDepth(float FovAngleYDegrees, fl
     ret[3][2] = NearZ;
     ret[3][3] = 0.0f;
     return ret;
+}
+
+// ======================================= Graphics
+Vec3 LinearToSRGB(const Vec3& linearCol)
+{
+    Vec3 sRGBLo = linearCol * 12.92f;
+    Vec3 sRGBHi = (std::pow(std::abs(linearCol), Vec3{ 1.0f / 2.4f, 1.0f / 2.4f, 1.0f / 2.4f }) * 1.055f) - 0.055f;
+    Vec3 sRGB;
+    sRGB[0] = linearCol[0] <= 0.0031308f ? sRGBLo[0] : sRGBHi[0];
+    sRGB[1] = linearCol[1] <= 0.0031308f ? sRGBLo[1] : sRGBHi[1];
+    sRGB[2] = linearCol[2] <= 0.0031308f ? sRGBLo[2] : sRGBHi[2];
+    return sRGB;
+}
+
+Vec3 SRGBToLinear(const Vec3& sRGBCol)
+{
+    Vec3 linearRGBLo = sRGBCol / 12.92f;
+    Vec3 linearRGBHi = std::pow((sRGBCol + 0.055f) / 1.055f, Vec3{ 2.4f, 2.4f, 2.4f });
+    Vec3 linearRGB;
+    linearRGB[0] = sRGBCol[0] <= 0.04045f ? linearRGBLo[0] : linearRGBHi[0];
+    linearRGB[1] = sRGBCol[1] <= 0.04045f ? linearRGBLo[1] : linearRGBHi[1];
+    linearRGB[2] = sRGBCol[2] <= 0.04045f ? linearRGBLo[2] : linearRGBHi[2];
+    return linearRGB;
 }
