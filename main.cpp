@@ -271,7 +271,11 @@ void RasterizeMesh(unsigned char* pixels, unsigned int width, unsigned int heigh
                 for (const PxInfo& entry : pxInfo)
                 {
                     float weight = entry.coverage * std::exp(entry.depth / c_gamma - softmax_max) / weightDenom;
-                    pixelColor = pixelColor + Vec3{entry.uv0[0], entry.uv0[1], 0.0f} * weight;
+
+                    // TODO: whatever shading
+                    //pixelColor = pixelColor + Vec3{entry.uv0[0], entry.uv0[1], 0.0f} * weight;
+                    pixelColor = pixelColor + entry.color * weight;
+
                     totalWeight += weight;
                 }
             }
@@ -356,7 +360,6 @@ TODO:
 - soft ras.
 - link to paper and the blog post that talks about more advanced stuff
 ? should you do the Silhouette aggregate function? "It's used with a separate silhouette loss for unsupervised reconstruction, where you only have a binary mask as ground truth (no color/shading info)"
-! will need to deal with sRGB correctness too before the end.
 
 Notes:
 The core idea is that rasterization has a binary hard edge over space, and occlusion via the depth buffer is a binary hard edge over depth.
